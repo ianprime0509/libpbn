@@ -17,4 +17,8 @@ pub fn main() !void {
     defer diag.deinit();
     var ps = try PuzzleSet.parse(gpa, xml, &diag);
     defer ps.deinit(gpa);
+
+    var stdout_buf = std.io.bufferedWriter(std.io.getStdOut().writer());
+    try ps.render(gpa, stdout_buf.writer());
+    try stdout_buf.flush();
 }

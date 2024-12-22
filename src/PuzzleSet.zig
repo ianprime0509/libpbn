@@ -1,9 +1,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 const xml = @import("xml");
 
 puzzles: Puzzle.List,
-data: std.ArrayListUnmanaged(u32),
+datas: std.ArrayListUnmanaged(u32),
 strings: std.ArrayListUnmanaged(u8),
 
 const PuzzleSet = @This();
@@ -12,7 +13,7 @@ pub const max_colors = 32;
 
 pub fn deinit(ps: *PuzzleSet, gpa: Allocator) void {
     ps.puzzles.deinit(gpa);
-    ps.data.deinit(gpa);
+    ps.datas.deinit(gpa);
     ps.strings.deinit(gpa);
     ps.* = undefined;
 }
@@ -109,7 +110,7 @@ pub fn parseReader(gpa: Allocator, pbn_xml: anytype, diag: *Diagnostics) (ParseE
 fn parseXml(gpa: Allocator, reader: *xml.Reader, diag: *Diagnostics) anyerror!PuzzleSet {
     var ps: PuzzleSet = .{
         .puzzles = .{},
-        .data = .{},
+        .datas = .{},
         .strings = .{},
     };
     errdefer ps.deinit(gpa);
@@ -117,7 +118,7 @@ fn parseXml(gpa: Allocator, reader: *xml.Reader, diag: *Diagnostics) anyerror!Pu
     // initialized later.
     try ps.puzzles.append(gpa, undefined);
     // The first element of data is used to represent an empty slice.
-    try ps.data.append(gpa, 0);
+    try ps.datas.append(gpa, 0);
     // The empty string must reside at index 0.
     try ps.strings.append(gpa, 0);
 
@@ -182,6 +183,7 @@ fn parseXml(gpa: Allocator, reader: *xml.Reader, diag: *Diagnostics) anyerror!Pu
     ps.puzzles.set(0, .{
         .source = source,
         .id = .empty,
+        .title = title,
         .author = author,
         .author_id = author_id,
         .copyright = copyright,
@@ -316,6 +318,7 @@ fn readPuzzle(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagno
     }
 
     try addDefaultColors(gpa, ps, &colors);
+    assignColorChars(colors.items);
     sortColors(ps, colors.items, background_color_name, default_color_name) catch |err| switch (err) {
         error.ColorUndefined => {
             try diag.addError(.puzzle_color_undefined, location);
@@ -333,9 +336,7 @@ fn readPuzzle(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagno
         if (i >= max_colors) break;
         const color_index: Color.Index = @enumFromInt(i);
         try colors_by_name.put(arena, try arena.dupe(u8, ps.string(color.name)), color_index);
-        if (color.char()) |char| {
-            try colors_by_char.put(arena, char, color_index);
-        }
+        try colors_by_char.put(arena, color.desc.char, color_index);
     }
 
     processClues(gpa, ps, parsed_clues.get(.rows), &row_clues, colors_by_name) catch |err| switch (err) {
@@ -379,6 +380,7 @@ fn readPuzzle(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagno
     try ps.puzzles.append(gpa, .{
         .source = source,
         .id = id,
+        .title = title,
         .author = author,
         .author_id = author_id,
         .copyright = copyright,
@@ -429,7 +431,7 @@ fn readColor(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagnos
     return .{
         .name = name,
         .desc = .{
-            .char = @enumFromInt(char),
+            .char = char,
             .r = rgb.r,
             .g = rgb.g,
             .b = rgb.b,
@@ -452,7 +454,7 @@ fn addDefaultColors(gpa: Allocator, ps: *PuzzleSet, colors: *std.ArrayListUnmana
         try colors.append(gpa, .{
             .name = try ps.addString(gpa, "black"),
             .desc = .{
-                .char = @enumFromInt('X'),
+                .char = 'X',
                 .r = 0,
                 .g = 0,
                 .b = 0,
@@ -463,12 +465,28 @@ fn addDefaultColors(gpa: Allocator, ps: *PuzzleSet, colors: *std.ArrayListUnmana
         try colors.append(gpa, .{
             .name = try ps.addString(gpa, "white"),
             .desc = .{
-                .char = @enumFromInt('.'),
+                .char = '.',
                 .r = 255,
                 .g = 255,
                 .b = 255,
             },
         });
+    }
+}
+
+/// Assigns characters to any colors missing them (up to a maximum of 32).
+fn assignColorChars(colors: []Color) void {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    comptime assert(alphabet.len == max_colors);
+    var assigned: std.StaticBitSet(alphabet.len) = .initFull();
+    for (colors) |*color| {
+        if (color.desc.char == 0) {
+            // If we run out of available colors from our 32-character alphabet,
+            // the puzzle will be deemed invalid regardless due to exceeding
+            // the maximum color limit, so it doesn't matter.
+            const available = assigned.toggleFirstSet() orelse return;
+            color.desc.char = alphabet[available];
+        }
     }
 }
 
@@ -608,9 +626,9 @@ fn processClues(
 ) !void {
     try clues.ensureTotalCapacityPrecise(gpa, parsed_clues.len);
     for (parsed_clues) |parsed_line| {
-        const line: DataIndex = @enumFromInt(ps.data.items.len);
-        try ps.data.ensureUnusedCapacity(gpa, dataSizeOf(Clue) * parsed_line.len + 1);
-        ps.data.appendAssumeCapacity(@intCast(parsed_line.len));
+        const line: DataIndex = @enumFromInt(ps.datas.items.len);
+        try ps.datas.ensureUnusedCapacity(gpa, dataSizeOf(Clue) * parsed_line.len + 1);
+        ps.datas.appendAssumeCapacity(@intCast(parsed_line.len));
         for (parsed_line) |parsed_clue| {
             _ = ps.addDataAssumeCapacity(Clue, .{
                 .color = colors_by_name.get(parsed_clue.color_name) orelse return error.ColorUndefined,
@@ -739,8 +757,8 @@ fn processSolution(
     n_columns: usize,
     colors_by_char: std.AutoArrayHashMapUnmanaged(u8, Color.Index),
 ) !Solution {
-    const image_index: DataIndex = @enumFromInt(ps.data.items.len);
-    try ps.data.ensureUnusedCapacity(gpa, n_rows * n_columns);
+    const image_index: DataIndex = @enumFromInt(ps.datas.items.len);
+    try ps.datas.ensureUnusedCapacity(gpa, n_rows * n_columns);
     if (solution.image.len != n_rows) return error.ImageMismatchedDimensions;
     for (solution.image) |row| {
         if (row.len != n_columns) return error.ImageMismatchedDimensions;
@@ -751,7 +769,7 @@ fn processSolution(
                 const color = colors_by_char.get(c) orelse return error.ColorUndefined;
                 cell_colors |= @as(u32, 1) << @intFromEnum(color);
             }
-            ps.data.appendAssumeCapacity(cell_colors);
+            ps.datas.appendAssumeCapacity(cell_colors);
         }
     }
 
@@ -850,9 +868,171 @@ fn AttributeIterator(comptime Name: type) type {
     };
 }
 
+pub fn render(ps: PuzzleSet, gpa: Allocator, writer: anytype) (Allocator.Error || @TypeOf(writer).Error)!void {
+    var output = xml.streamingOutput(writer);
+    var xml_writer = output.writer(gpa, .{
+        .indent = "  ",
+        .namespace_aware = false,
+    });
+    defer xml_writer.deinit();
+    return @errorCast(ps.renderXml(xml_writer.raw()));
+}
+
+fn renderXml(ps: PuzzleSet, writer: *xml.Writer) anyerror!void {
+    const puzzles = ps.puzzles.slice();
+
+    try writer.xmlDeclaration("UTF-8", true);
+    try writer.elementStart("puzzleset");
+    try ps.renderStringElement(writer, "source", puzzles.items(.source)[0]);
+    try ps.renderStringElement(writer, "title", puzzles.items(.title)[0]);
+    try ps.renderStringElement(writer, "author", puzzles.items(.author)[0]);
+    try ps.renderStringElement(writer, "authorid", puzzles.items(.author_id)[0]);
+    try ps.renderStringElement(writer, "copyright", puzzles.items(.copyright)[0]);
+    for (1..ps.puzzles.len) |i| {
+        try ps.renderPuzzle(writer, puzzles, @enumFromInt(i));
+    }
+    try ps.renderNotes(writer, puzzles.items(.notes)[0]);
+    try writer.elementEnd();
+}
+
+fn renderPuzzle(ps: PuzzleSet, writer: *xml.Writer, puzzles: Puzzle.List.Slice, puzzle: Puzzle.Index) !void {
+    const colors = puzzles.items(.colors)[@intFromEnum(puzzle)];
+    const row_clues = puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+    const n_rows = ps.dataSliceLen(row_clues);
+    const column_clues = puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+    const n_columns = ps.dataSliceLen(column_clues);
+
+    try writer.elementStart("puzzle");
+    const default_color = ps.dataSliceElem(Color, colors, @intFromEnum(Color.Index.default));
+    try writer.attribute("defaultcolor", ps.string(default_color.name));
+    const background_color = ps.dataSliceElem(Color, colors, @intFromEnum(Color.Index.background));
+    try writer.attribute("backgroundcolor", ps.string(background_color.name));
+    try ps.renderStringElement(writer, "source", puzzles.items(.source)[@intFromEnum(puzzle)]);
+    try ps.renderStringElement(writer, "id", puzzles.items(.id)[@intFromEnum(puzzle)]);
+    try ps.renderStringElement(writer, "title", puzzles.items(.title)[@intFromEnum(puzzle)]);
+    try ps.renderStringElement(writer, "author", puzzles.items(.author)[@intFromEnum(puzzle)]);
+    try ps.renderStringElement(writer, "authorid", puzzles.items(.author_id)[@intFromEnum(puzzle)]);
+    try ps.renderStringElement(writer, "copyright", puzzles.items(.copyright)[@intFromEnum(puzzle)]);
+    try ps.renderStringElement(writer, "description", puzzles.items(.description)[@intFromEnum(puzzle)]);
+    try ps.renderColors(writer, colors);
+    try ps.renderClues(writer, row_clues, .rows, colors);
+    try ps.renderClues(writer, column_clues, .columns, colors);
+    try ps.renderSolutions(writer, puzzles.items(.goals)[@intFromEnum(puzzle)], .goal, n_rows, n_columns, colors);
+    try ps.renderSolutions(writer, puzzles.items(.solved_solutions)[@intFromEnum(puzzle)], .solution, n_rows, n_columns, colors);
+    try ps.renderSolutions(writer, puzzles.items(.saved_solutions)[@intFromEnum(puzzle)], .saved, n_rows, n_columns, colors);
+    try ps.renderNotes(writer, puzzles.items(.notes)[@intFromEnum(puzzle)]);
+    try writer.elementEnd();
+}
+
+fn renderColors(ps: PuzzleSet, writer: *xml.Writer, colors: DataIndex) !void {
+    for (0..ps.dataSliceLen(colors)) |i| {
+        const color = ps.dataSliceElem(Color, colors, i);
+        try writer.elementStart("color");
+        try writer.attribute("name", ps.string(color.name));
+        try writer.attribute("char", &.{color.desc.char});
+        var buf: [6]u8 = undefined;
+        const rgb = std.fmt.bufPrint(&buf, "{X:0>2}{X:0>2}{X:0>2}", .{ color.desc.r, color.desc.g, color.desc.b }) catch unreachable;
+        try writer.text(rgb);
+        try writer.elementEnd();
+    }
+}
+
+fn renderClues(
+    ps: PuzzleSet,
+    writer: *xml.Writer,
+    clues: DataIndex,
+    clues_type: ParsedClue.Type,
+    colors: DataIndex,
+) !void {
+    try writer.elementStart("clues");
+    try writer.attribute("type", @tagName(clues_type));
+    for (0..ps.dataSliceLen(clues)) |i| {
+        const line = ps.dataSliceElem(DataIndex, clues, i);
+        try writer.elementStart("line");
+        for (0..ps.dataSliceLen(line)) |j| {
+            const clue = ps.dataSliceElem(Clue, line, j);
+            try writer.elementStart("count");
+            if (clue.color != .default) {
+                const color = ps.dataSliceElem(Color, colors, @intFromEnum(clue.color));
+                try writer.attribute("color", ps.string(color.name));
+            }
+            var buf: [32]u8 = undefined;
+            const count = std.fmt.bufPrint(&buf, "{}", .{clue.count}) catch unreachable;
+            try writer.text(count);
+            try writer.elementEnd();
+        }
+        try writer.elementEnd();
+    }
+    try writer.elementEnd();
+}
+
+fn renderSolutions(
+    ps: PuzzleSet,
+    writer: *xml.Writer,
+    solutions: DataIndex,
+    solutions_type: ParsedSolution.Type,
+    n_rows: usize,
+    n_columns: usize,
+    colors: DataIndex,
+) !void {
+    for (0..ps.dataSliceLen(solutions)) |i| {
+        const solution = ps.dataSliceElem(Solution, solutions, i);
+        try writer.elementStart("solution");
+        if (solutions_type != .goal) try writer.attribute("type", @tagName(solutions_type));
+        const id = ps.string(solution.id);
+        if (id.len != 0) try writer.attribute("id", id);
+        try ps.renderImage(writer, solution.image, n_rows, n_columns, colors);
+        try ps.renderNotes(writer, solution.notes);
+        try writer.elementEnd();
+    }
+}
+
+fn renderImage(
+    ps: PuzzleSet,
+    writer: *xml.Writer,
+    image: DataIndex,
+    n_rows: usize,
+    n_columns: usize,
+    colors: DataIndex,
+) !void {
+    try writer.elementStart("image");
+    for (0..n_rows) |i| {
+        try writer.text("\n|");
+        for (ps.datas.items[@intFromEnum(image) + i * n_columns ..][0..n_columns]) |cell| {
+            var color_set: std.bit_set.IntegerBitSet(32) = .{ .mask = cell };
+            const n_set = color_set.count();
+            if (n_set == ps.dataSliceLen(colors)) {
+                try writer.text("?");
+                continue;
+            }
+            if (n_set != 1) try writer.text("[");
+            var color_iter = color_set.iterator(.{});
+            while (color_iter.next()) |color_index| {
+                const color = ps.dataSliceElem(Color, colors, color_index);
+                try writer.text(&.{color.desc.char});
+            }
+            if (n_set != 1) try writer.text("]");
+        }
+        try writer.text("|");
+    }
+    try writer.text("\n");
+    try writer.elementEnd();
+}
+
+fn renderNotes(ps: PuzzleSet, writer: *xml.Writer, notes: DataIndex) !void {
+    const n = ps.dataSliceLen(notes);
+    if (n == 0) return;
+    try writer.elementStart("notes");
+    for (0..n) |i| {
+        try ps.renderStringElement(writer, "note", ps.dataSliceElem(StringIndex, notes, i));
+    }
+    try writer.elementEnd();
+}
+
 pub const Puzzle = struct {
     source: StringIndex,
     id: StringIndex,
+    title: StringIndex,
     author: StringIndex,
     author_id: StringIndex,
     copyright: StringIndex,
@@ -876,24 +1056,15 @@ pub const Puzzle = struct {
 pub const Color = struct {
     name: StringIndex,
     desc: packed struct(u32) {
-        char: Char,
+        char: u8,
         r: u8,
         g: u8,
         b: u8,
     },
 
-    pub fn char(color: Color) ?u8 {
-        return if (color.desc.char != .none) @intFromEnum(color.desc.char) else null;
-    }
-
     pub const Index = enum(u5) {
         background = 0,
         default = 1,
-        _,
-    };
-
-    pub const Char = enum(u8) {
-        none = 0,
         _,
     };
 };
@@ -923,33 +1094,61 @@ fn dataSizeOf(comptime T: type) usize {
     return @divExact(@bitSizeOf(T), 32);
 }
 
+fn data(ps: PuzzleSet, comptime T: type, index: DataIndex) T {
+    if (@bitSizeOf(T) == 32) {
+        return fromData(T, ps.datas.items[@intFromEnum(index)]);
+    } else {
+        var value: T = undefined;
+        inline for (@typeInfo(T).@"struct".fields, @intFromEnum(index)..) |field, i| {
+            @field(value, field.name) = fromData(field.type, ps.datas.items[i]);
+        }
+        return value;
+    }
+}
+
+fn dataSliceLen(ps: PuzzleSet, index: DataIndex) u32 {
+    return ps.datas.items[@intFromEnum(index)];
+}
+
+fn dataSliceElem(ps: PuzzleSet, comptime T: type, index: DataIndex, i: usize) T {
+    return ps.data(T, @enumFromInt(@intFromEnum(index) + 1 + i * dataSizeOf(T)));
+}
+
+fn fromData(comptime T: type, value: u32) T {
+    if (@typeInfo(T) == .@"enum") {
+        return @enumFromInt(value);
+    } else {
+        return @bitCast(value);
+    }
+}
+
 fn addData(ps: *PuzzleSet, gpa: Allocator, comptime T: type, value: T) !DataIndex {
-    try ps.data.ensureUnusedCapacity(gpa, dataSizeOf(T));
+    try ps.datas.ensureUnusedCapacity(gpa, dataSizeOf(T));
     return ps.addDataAssumeCapacity(T, value);
 }
 
 fn addDataAssumeCapacity(ps: *PuzzleSet, comptime T: type, value: T) DataIndex {
-    const index: DataIndex = @enumFromInt(ps.data.items.len);
+    const index: DataIndex = @enumFromInt(ps.datas.items.len);
     if (@bitSizeOf(T) == 32) {
-        ps.data.appendAssumeCapacity(toData(value));
+        ps.datas.appendAssumeCapacity(toData(value));
     } else {
         inline for (@typeInfo(T).@"struct".fields) |field| {
-            ps.data.appendAssumeCapacity(toData(@field(value, field.name)));
+            ps.datas.appendAssumeCapacity(toData(@field(value, field.name)));
         }
     }
     return index;
 }
 
 fn addDataSlice(ps: *PuzzleSet, gpa: Allocator, comptime T: type, slice: []const T) !DataIndex {
-    try ps.data.ensureUnusedCapacity(gpa, dataSizeOf(T) * slice.len + 1);
-    const index: DataIndex = @enumFromInt(ps.data.items.len);
-    ps.data.appendAssumeCapacity(@intCast(slice.len));
+    try ps.datas.ensureUnusedCapacity(gpa, dataSizeOf(T) * slice.len + 1);
+    const index: DataIndex = @enumFromInt(ps.datas.items.len);
+    ps.datas.appendAssumeCapacity(@intCast(slice.len));
     if (@bitSizeOf(T) == 32) {
-        ps.data.appendSliceAssumeCapacity(@ptrCast(slice));
+        ps.datas.appendSliceAssumeCapacity(@ptrCast(slice));
     } else {
         for (slice) |value| {
             inline for (@typeInfo(T).@"struct".fields) |field| {
-                ps.data.appendAssumeCapacity(toData(@field(value, field.name)));
+                ps.datas.appendAssumeCapacity(toData(@field(value, field.name)));
             }
         }
     }
@@ -1017,4 +1216,12 @@ fn readElementTextWrite(reader: *xml.Reader, writer: std.io.AnyWriter, diag: *Di
             },
         }
     }
+}
+
+fn renderStringElement(ps: *const PuzzleSet, writer: *xml.Writer, name: []const u8, text: StringIndex) !void {
+    const s = ps.string(text);
+    if (s.len == 0) return;
+    try writer.elementStart(name);
+    try writer.text(s);
+    try writer.elementEnd();
 }

@@ -10,8 +10,8 @@
     },
     .dependencies = .{
         .xml = .{
-            .url = "git+https://github.com/ianprime0509/zig-xml?ref=main#5656de48d8febd88f80ca9876591a2bec4daffad",
-            .hash = "12200db01caa0380c3d87b16fb761c0c0c1ef8eeb9e27d25e6d1fcb1b678c51b4231",
+            .url = "git+https://github.com/ianprime0509/zig-xml?ref=main#5f51fa0b26c2b90045596a81e1b84122e4300c70",
+            .hash = "12206e7320b3dfece3152a0dda14563ebfb44111d416a74ac7430ceb8b0b4ef143b8",
         },
     },
 }
