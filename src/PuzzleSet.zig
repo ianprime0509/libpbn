@@ -83,10 +83,11 @@ pub fn parse(gpa: Allocator, pbn_xml: []const u8, diag: *Diagnostics) ParseError
         .namespace_aware = false,
     });
     defer reader.deinit();
-    const puzzle_set = parseXml(gpa, reader.raw(), diag) catch |err| switch (err) {
+    var puzzle_set = parseXml(gpa, reader.raw(), diag) catch |err| switch (err) {
         error.MalformedXml => return diag.fatal(.{ .xml = reader.errorCode() }, reader.errorLocation()),
         else => |other| return @as(ParseError, @errorCast(other)),
     };
+    errdefer puzzle_set.deinit(gpa);
     if (diag.errors.items.len > 0) return error.InvalidPbn;
     return puzzle_set;
 }
@@ -99,10 +100,11 @@ pub fn parseReader(gpa: Allocator, pbn_xml: anytype, diag: *Diagnostics) (ParseE
         .namespace_aware = false,
     });
     defer reader.deinit();
-    const puzzle_set = parseXml(gpa, reader.raw(), diag) catch |err| switch (err) {
+    var puzzle_set = parseXml(gpa, reader.raw(), diag) catch |err| switch (err) {
         error.MalformedXml => return diag.fatal(.{ .xml = reader.errorCode() }, reader.errorLocation()),
         else => |other| return @as(ParseError || @TypeOf(pbn_xml).Error, @errorCast(other)),
     };
+    errdefer puzzle_set.deinit(gpa);
     if (diag.errors.items.len > 0) return error.InvalidPbn;
     return puzzle_set;
 }
@@ -905,9 +907,15 @@ fn renderPuzzle(ps: PuzzleSet, writer: *xml.Writer, puzzles: Puzzle.List.Slice, 
 
     try writer.elementStart("puzzle");
     const default_color = ps.dataSliceElem(Color, colors, @intFromEnum(Color.Index.default));
-    try writer.attribute("defaultcolor", ps.string(default_color.name));
+    const default_color_name = ps.string(default_color.name);
+    if (!std.mem.eql(u8, default_color_name, "black")) {
+        try writer.attribute("defaultcolor", default_color_name);
+    }
     const background_color = ps.dataSliceElem(Color, colors, @intFromEnum(Color.Index.background));
-    try writer.attribute("backgroundcolor", ps.string(background_color.name));
+    const background_color_name = ps.string(background_color.name);
+    if (!std.mem.eql(u8, background_color_name, "white")) {
+        try writer.attribute("backgroundcolor", background_color_name);
+    }
     try ps.renderStringElement(writer, "source", puzzles.items(.source)[@intFromEnum(puzzle)]);
     try ps.renderStringElement(writer, "id", puzzles.items(.id)[@intFromEnum(puzzle)]);
     try ps.renderStringElement(writer, "title", puzzles.items(.title)[@intFromEnum(puzzle)]);
@@ -1225,4 +1233,86 @@ fn renderStringElement(ps: *const PuzzleSet, writer: *xml.Writer, name: []const 
     try writer.elementStart(name);
     try writer.text(s);
     try writer.elementEnd();
+}
+
+test "parse and render - simple puzzle" {
+    try testParseAndRender(
+        \\<puzzleset>
+        \\  <title>Test puzzle set</title>
+        \\  <author>Ian Johnson</author>
+        \\  <copyright>Public domain</copyright>
+        \\  <puzzle>
+        \\    <title>Test puzzle</title>
+        \\    <clues type="rows">
+        \\      <line><count>1</count></line>
+        \\      <line><count color="black">2</count></line>
+        \\    </clues>
+        \\    <clues type="columns">
+        \\      <line><count>2</count></line>
+        \\      <line><count>1</count></line>
+        \\    </clues>
+        \\    <solution type="goal">
+        \\      <image>| X . | | X X |</image>
+        \\    </solution>
+        \\  </puzzle>
+        \\</puzzleset>
+    ,
+        \\<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        \\<puzzleset>
+        \\  <title>Test puzzle set</title>
+        \\  <author>Ian Johnson</author>
+        \\  <copyright>Public domain</copyright>
+        \\  <puzzle>
+        \\    <title>Test puzzle</title>
+        \\    <color name="white" char=".">FFFFFF</color>
+        \\    <color name="black" char="X">000000</color>
+        \\    <clues type="rows">
+        \\      <line>
+        \\        <count>1</count>
+        \\      </line>
+        \\      <line>
+        \\        <count>2</count>
+        \\      </line>
+        \\    </clues>
+        \\    <clues type="columns">
+        \\      <line>
+        \\        <count>2</count>
+        \\      </line>
+        \\      <line>
+        \\        <count>1</count>
+        \\      </line>
+        \\    </clues>
+        \\    <solution>
+        \\      <image>
+        \\|X.|
+        \\|XX|
+        \\</image>
+        \\    </solution>
+        \\  </puzzle>
+        \\</puzzleset>
+        \\
+    );
+}
+
+fn testParseAndRender(input: []const u8, expected_output: []const u8) !void {
+    const gpa = std.testing.allocator;
+
+    var diag: Diagnostics = .init(gpa);
+    defer diag.deinit();
+    var ps = PuzzleSet.parse(gpa, input, &diag) catch |err| switch (err) {
+        error.InvalidPbn => {
+            for (diag.errors.items) |e| {
+                std.debug.print("unexpected error: {}\n", .{e});
+            }
+            return error.InvalidPbn;
+        },
+        else => |other| return other,
+    };
+    defer ps.deinit(gpa);
+    try std.testing.expectEqual(0, diag.errors.items.len);
+
+    var output: std.ArrayListUnmanaged(u8) = .empty;
+    defer output.deinit(gpa);
+    try ps.render(gpa, output.writer(gpa));
+    try std.testing.expectEqualStrings(expected_output, output.items);
 }

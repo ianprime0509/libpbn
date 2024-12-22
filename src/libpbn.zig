@@ -22,3 +22,7 @@ pub fn main() !void {
     try ps.render(gpa, stdout_buf.writer());
     try stdout_buf.flush();
 }
+
+test {
+    _ = PuzzleSet;
+}
