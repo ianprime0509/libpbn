@@ -54,7 +54,7 @@ pub const Diagnostics = struct {
 
     pub fn init(gpa: Allocator) Diagnostics {
         return .{
-            .errors = .{},
+            .errors = .empty,
             .gpa = gpa,
         };
     }
@@ -77,7 +77,7 @@ pub const Diagnostics = struct {
 pub const ParseError = error{InvalidPbn} || Allocator.Error;
 
 pub fn parse(gpa: Allocator, pbn_xml: []const u8, diag: *Diagnostics) ParseError!PuzzleSet {
-    var doc = xml.StaticDocument.init(pbn_xml);
+    var doc: xml.StaticDocument = .init(pbn_xml);
     var reader = doc.reader(gpa, .{
         // The PBN format does not use namespaces.
         .namespace_aware = false,
@@ -109,9 +109,9 @@ pub fn parseReader(gpa: Allocator, pbn_xml: anytype, diag: *Diagnostics) (ParseE
 
 fn parseXml(gpa: Allocator, reader: *xml.Reader, diag: *Diagnostics) anyerror!PuzzleSet {
     var ps: PuzzleSet = .{
-        .puzzles = .{},
-        .datas = .{},
-        .strings = .{},
+        .puzzles = .empty,
+        .datas = .empty,
+        .strings = .empty,
     };
     errdefer ps.deinit(gpa);
     // The puzzle set data is represented as the "root" puzzle, which will be
@@ -127,9 +127,9 @@ fn parseXml(gpa: Allocator, reader: *xml.Reader, diag: *Diagnostics) anyerror!Pu
     var author: StringIndex = .empty;
     var author_id: StringIndex = .empty;
     var copyright: StringIndex = .empty;
-    var puzzles: std.ArrayListUnmanaged(Puzzle.Index) = .{};
+    var puzzles: std.ArrayListUnmanaged(Puzzle.Index) = .empty;
     defer puzzles.deinit(gpa);
-    var notes: std.ArrayListUnmanaged(StringIndex) = .{};
+    var notes: std.ArrayListUnmanaged(StringIndex) = .empty;
     defer notes.deinit(gpa);
 
     try reader.skipProlog();
@@ -208,31 +208,31 @@ fn readPuzzle(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagno
     var author_id: StringIndex = .empty;
     var copyright: StringIndex = .empty;
     var description: StringIndex = .empty;
-    var colors: std.ArrayListUnmanaged(Color) = .{};
+    var colors: std.ArrayListUnmanaged(Color) = .empty;
     defer colors.deinit(gpa);
-    var row_clues: std.ArrayListUnmanaged(DataIndex) = .{};
+    var row_clues: std.ArrayListUnmanaged(DataIndex) = .empty;
     defer row_clues.deinit(gpa);
-    var column_clues: std.ArrayListUnmanaged(DataIndex) = .{};
+    var column_clues: std.ArrayListUnmanaged(DataIndex) = .empty;
     defer column_clues.deinit(gpa);
-    var goals: std.ArrayListUnmanaged(Solution) = .{};
+    var goals: std.ArrayListUnmanaged(Solution) = .empty;
     defer goals.deinit(gpa);
-    var solved_solutions: std.ArrayListUnmanaged(Solution) = .{};
+    var solved_solutions: std.ArrayListUnmanaged(Solution) = .empty;
     defer solved_solutions.deinit(gpa);
-    var saved_solutions: std.ArrayListUnmanaged(Solution) = .{};
+    var saved_solutions: std.ArrayListUnmanaged(Solution) = .empty;
     defer saved_solutions.deinit(gpa);
-    var notes: std.ArrayListUnmanaged(StringIndex) = .{};
+    var notes: std.ArrayListUnmanaged(StringIndex) = .empty;
     defer notes.deinit(gpa);
 
     // To avoid managing many smaller (and more difficult to manage)
     // allocations, all the "complex" intermediate parsing state is owned by an
     // arena.
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state: std.heap.ArenaAllocator = .init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     var default_color_name: []const u8 = "black";
     var background_color_name: []const u8 = "white";
-    var parsed_clues = std.EnumArray(ParsedClue.Type, [][]ParsedClue).initFill(&.{});
-    var parsed_solutions: std.ArrayListUnmanaged(ParsedSolution) = .{};
+    var parsed_clues: std.EnumArray(ParsedClue.Type, [][]ParsedClue) = .initFill(&.{});
+    var parsed_solutions: std.ArrayListUnmanaged(ParsedSolution) = .empty;
 
     var attrs = attributes(reader, diag, enum {
         type,
@@ -330,8 +330,8 @@ fn readPuzzle(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagno
         return;
     }
 
-    var colors_by_name: std.StringArrayHashMapUnmanaged(Color.Index) = .{};
-    var colors_by_char: std.AutoArrayHashMapUnmanaged(u8, Color.Index) = .{};
+    var colors_by_name: std.StringArrayHashMapUnmanaged(Color.Index) = .empty;
+    var colors_by_char: std.AutoArrayHashMapUnmanaged(u8, Color.Index) = .empty;
     for (colors.items, 0..) |color, i| {
         if (i >= max_colors) break;
         const color_index: Color.Index = @enumFromInt(i);
@@ -548,7 +548,7 @@ fn readClues(
     default_color_name: []const u8,
     diag: *Diagnostics,
 ) !void {
-    var lines: std.ArrayListUnmanaged([]ParsedClue) = .{};
+    var lines: std.ArrayListUnmanaged([]ParsedClue) = .empty;
 
     var maybe_clues_type: ?ParsedClue.Type = null;
     var attrs = attributes(reader, diag, enum { type });
@@ -578,7 +578,7 @@ fn readCluesLine(
     default_color_name: []const u8,
     diag: *Diagnostics,
 ) ![]ParsedClue {
-    var clues: std.ArrayListUnmanaged(ParsedClue) = .{};
+    var clues: std.ArrayListUnmanaged(ParsedClue) = .empty;
 
     try noAttributes(reader, diag);
 
@@ -659,7 +659,7 @@ fn readSolution(
     var @"type": ParsedSolution.Type = .goal;
     var id: StringIndex = .empty;
     var image: ?[][][]u8 = null;
-    var notes: std.ArrayListUnmanaged(StringIndex) = .{};
+    var notes: std.ArrayListUnmanaged(StringIndex) = .empty;
 
     var attrs = attributes(reader, diag, enum { type, id });
     while (try attrs.next()) |attr| {
@@ -705,7 +705,7 @@ fn readImage(arena: Allocator, reader: *xml.Reader, diag: *Diagnostics) !?[][][]
     const location = reader.location();
     const raw = try readElementTextAlloc(arena, reader, diag);
 
-    var rows: std.ArrayListUnmanaged([][]u8) = .{};
+    var rows: std.ArrayListUnmanaged([][]u8) = .empty;
     var after_last_row: usize = 0;
     while (std.mem.indexOfScalarPos(u8, raw, after_last_row, '|')) |row_start| {
         if (std.mem.indexOfNone(u8, raw[after_last_row..row_start], &std.ascii.whitespace) != null) {
@@ -719,7 +719,7 @@ fn readImage(arena: Allocator, reader: *xml.Reader, diag: *Diagnostics) !?[][][]
         after_last_row = row_end + 1;
 
         const row_raw = raw[row_start + 1 .. row_end];
-        var columns: std.ArrayListUnmanaged([]u8) = .{};
+        var columns: std.ArrayListUnmanaged([]u8) = .empty;
         var i: usize = 0;
         while (i < row_raw.len) : (i += 1) {
             switch (row_raw[i]) {
@@ -1185,7 +1185,7 @@ fn addElementString(ps: *PuzzleSet, gpa: Allocator, reader: *xml.Reader, diag: *
 }
 
 fn readElementTextAlloc(gpa: Allocator, reader: *xml.Reader, diag: *Diagnostics) ![]u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
     defer buf.deinit(gpa);
     var writer = buf.writer(gpa);
     try readElementTextWrite(reader, writer.any(), diag);
