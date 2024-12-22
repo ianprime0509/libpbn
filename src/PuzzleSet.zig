@@ -893,6 +893,7 @@ fn renderXml(ps: PuzzleSet, writer: *xml.Writer) anyerror!void {
     }
     try ps.renderNotes(writer, puzzles.items(.notes)[0]);
     try writer.elementEnd();
+    try writer.sink.write("\n");
 }
 
 fn renderPuzzle(ps: PuzzleSet, writer: *xml.Writer, puzzles: Puzzle.List.Slice, puzzle: Puzzle.Index) !void {
