@@ -39,6 +39,8 @@ pub const Diagnostics = struct {
             color_missing_name,
             color_invalid_char,
             color_invalid_rgb,
+            color_duplicate_name,
+            color_duplicate_char,
             clues_invalid_type,
             clues_missing_type,
             clues_duplicate,
@@ -337,8 +339,20 @@ fn readPuzzle(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagno
     for (colors.items, 0..) |color, i| {
         if (i >= max_colors) break;
         const color_index: Color.Index = @enumFromInt(i);
-        try colors_by_name.put(arena, try arena.dupe(u8, ps.string(color.name)), color_index);
-        try colors_by_char.put(arena, color.desc.char, color_index);
+        const color_name = ps.string(color.name);
+        const by_name_gop = try colors_by_name.getOrPut(arena, color_name);
+        if (by_name_gop.found_existing) {
+            try diag.addError(.color_duplicate_name, location);
+        } else {
+            by_name_gop.key_ptr.* = try arena.dupe(u8, color_name);
+            by_name_gop.value_ptr.* = color_index;
+        }
+        const by_char_gop = try colors_by_char.getOrPut(arena, color.desc.char);
+        if (by_char_gop.found_existing) {
+            try diag.addError(.color_duplicate_char, location);
+        } else {
+            by_char_gop.value_ptr.* = color_index;
+        }
     }
 
     processClues(gpa, ps, parsed_clues.get(.rows), &row_clues, colors_by_name) catch |err| switch (err) {
@@ -765,13 +779,8 @@ fn processSolution(
     for (solution.image) |row| {
         if (row.len != n_columns) return error.ImageMismatchedDimensions;
         for (row) |cell| {
-            if (solution.type != .saved and cell.len != 1) return error.SolutionIndeterminateImage;
-            var cell_colors: u32 = 0;
-            for (cell) |c| {
-                const color = colors_by_char.get(c) orelse return error.ColorUndefined;
-                cell_colors |= @as(u32, 1) << @intFromEnum(color);
-            }
-            ps.datas.appendAssumeCapacity(cell_colors);
+            const colors = try processCell(cell, solution.type, colors_by_char);
+            ps.datas.appendAssumeCapacity(colors);
         }
     }
 
@@ -780,6 +789,24 @@ fn processSolution(
         .image = image_index,
         .notes = try ps.addDataSlice(gpa, StringIndex, solution.notes),
     };
+}
+
+fn processCell(
+    cell: []const u8,
+    solution_type: ParsedSolution.Type,
+    colors_by_char: std.AutoArrayHashMapUnmanaged(u8, Color.Index),
+) !u32 {
+    if (solution_type != .saved and (cell.len != 1 or cell[0] == '?')) return error.SolutionIndeterminateImage;
+    var colors: u32 = 0;
+    for (cell) |c| {
+        if (c == '?') {
+            colors = @intCast((@as(u33, 1) << @intCast(colors_by_char.count())) - 1);
+        } else {
+            const color = colors_by_char.get(c) orelse return error.ColorUndefined;
+            colors |= @as(u32, 1) << @intFromEnum(color);
+        }
+    }
+    return colors;
 }
 
 const ParsedSolution = struct {
@@ -1252,7 +1279,10 @@ test "parse and render - simple puzzle" {
         \\      <line><count>1</count></line>
         \\    </clues>
         \\    <solution type="goal">
-        \\      <image>| X . | | X X |</image>
+        \\      <image>| X . | | [X] X |</image>
+        \\    </solution>
+        \\    <solution type="saved">
+        \\      <image>| [X.]? | | XX |</image>
         \\    </solution>
         \\  </puzzle>
         \\</puzzleset>
@@ -1285,6 +1315,12 @@ test "parse and render - simple puzzle" {
         \\    <solution>
         \\      <image>
         \\|X.|
+        \\|XX|
+        \\</image>
+        \\    </solution>
+        \\    <solution type="saved">
+        \\      <image>
+        \\|??|
         \\|XX|
         \\</image>
         \\    </solution>
