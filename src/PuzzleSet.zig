@@ -370,12 +370,19 @@ fn readPuzzle(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagno
         error.OutOfMemory => return error.OutOfMemory,
     };
 
-    if (row_clues.items.len == 0 or column_clues.items.len == 0) {
-        @panic("TODO: implement deriving clues from goal");
-    }
-
-    const n_rows = row_clues.items.len;
-    const n_columns = column_clues.items.len;
+    const clues_available = row_clues.items.len != 0 and column_clues.items.len != 0;
+    const n_rows, const n_columns = dims: {
+        if (clues_available) {
+            break :dims .{ row_clues.items.len, column_clues.items.len };
+        } else for (parsed_solutions.items) |parsed_solution| {
+            if (parsed_solution.type == .goal) {
+                break :dims .{ parsed_solution.image.len, parsed_solution.image[0].len };
+            }
+        } else {
+            try diag.addError(.puzzle_missing_goal, location);
+            return;
+        }
+    };
 
     for (parsed_solutions.items) |parsed_solution| {
         if (processSolution(gpa, ps, parsed_solution, n_rows, n_columns, colors_by_char)) |solution| {
@@ -391,6 +398,11 @@ fn readPuzzle(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagno
             error.ColorUndefined => try diag.addError(.puzzle_color_undefined, location),
             error.OutOfMemory => return error.OutOfMemory,
         }
+    }
+
+    if (!clues_available) {
+        // We already validated above that there is at least one goal available.
+        try ps.deriveClues(gpa, n_rows, &row_clues, n_columns, &column_clues, goals.items[0].image);
     }
 
     try ps.puzzles.append(gpa, .{
@@ -760,7 +772,15 @@ fn readImage(arena: Allocator, reader: *xml.Reader, diag: *Diagnostics) !?[][][]
                 else => try columns.append(arena, row_raw[i..][0..1]),
             }
         }
+        if (columns.items.len == 0) {
+            try diag.addError(.image_invalid, location);
+            return null;
+        }
         try rows.append(arena, try columns.toOwnedSlice(arena));
+    }
+    if (rows.items.len == 0) {
+        try diag.addError(.image_invalid, location);
+        return null;
     }
     return try rows.toOwnedSlice(arena);
 }
@@ -807,6 +827,83 @@ fn processCell(
         }
     }
     return colors;
+}
+
+fn deriveClues(
+    ps: *PuzzleSet,
+    gpa: Allocator,
+    n_rows: usize,
+    row_clues: *std.ArrayListUnmanaged(DataIndex),
+    n_columns: usize,
+    column_clues: *std.ArrayListUnmanaged(DataIndex),
+    image: DataIndex,
+) !void {
+    // We have already validated that the image is a proper goal image, so that
+    // each cell has exactly one bit set.
+    var clues: std.ArrayListUnmanaged(Clue) = .empty;
+    defer clues.deinit(gpa);
+
+    try row_clues.ensureTotalCapacityPrecise(gpa, n_rows);
+    for (0..n_rows) |i| {
+        clues.clearRetainingCapacity();
+
+        var run_color: Color.Index = .background;
+        var run_len: usize = 0;
+        for (0..n_columns) |j| {
+            const color: Color.Index = @enumFromInt(@ctz(ps.datas.items[@intFromEnum(image) + i * n_columns + j]));
+            if (color == run_color) {
+                run_len += 1;
+            } else {
+                if (run_color != .background) {
+                    try clues.append(gpa, .{
+                        .color = run_color,
+                        .count = @intCast(run_len),
+                    });
+                }
+                run_color = color;
+                run_len = 1;
+            }
+        }
+        if (run_color != .background) {
+            try clues.append(gpa, .{
+                .color = run_color,
+                .count = @intCast(run_len),
+            });
+        }
+
+        row_clues.appendAssumeCapacity(try ps.addDataSlice(gpa, Clue, clues.items));
+    }
+
+    try column_clues.ensureTotalCapacityPrecise(gpa, n_columns);
+    for (0..n_columns) |j| {
+        clues.clearRetainingCapacity();
+
+        var run_color: Color.Index = .background;
+        var run_len: usize = 0;
+        for (0..n_rows) |i| {
+            const color: Color.Index = @enumFromInt(@ctz(ps.datas.items[@intFromEnum(image) + i * n_columns + j]));
+            if (color == run_color) {
+                run_len += 1;
+            } else {
+                if (run_color != .background) {
+                    try clues.append(gpa, .{
+                        .color = run_color,
+                        .count = @intCast(run_len),
+                    });
+                }
+                run_color = color;
+                run_len = 1;
+            }
+        }
+        if (run_color != .background) {
+            try clues.append(gpa, .{
+                .color = run_color,
+                .count = @intCast(run_len),
+            });
+        }
+
+        column_clues.appendAssumeCapacity(try ps.addDataSlice(gpa, Clue, clues.items));
+    }
 }
 
 const ParsedSolution = struct {
@@ -1278,6 +1375,66 @@ test "parse and render - simple puzzle" {
         \\      <line><count>2</count></line>
         \\      <line><count>1</count></line>
         \\    </clues>
+        \\    <solution type="goal">
+        \\      <image>| X . | | [X] X |</image>
+        \\    </solution>
+        \\    <solution type="saved">
+        \\      <image>| [X.]? | | XX |</image>
+        \\    </solution>
+        \\  </puzzle>
+        \\</puzzleset>
+    ,
+        \\<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        \\<puzzleset>
+        \\  <title>Test puzzle set</title>
+        \\  <author>Ian Johnson</author>
+        \\  <copyright>Public domain</copyright>
+        \\  <puzzle>
+        \\    <title>Test puzzle</title>
+        \\    <color name="white" char=".">FFFFFF</color>
+        \\    <color name="black" char="X">000000</color>
+        \\    <clues type="rows">
+        \\      <line>
+        \\        <count>1</count>
+        \\      </line>
+        \\      <line>
+        \\        <count>2</count>
+        \\      </line>
+        \\    </clues>
+        \\    <clues type="columns">
+        \\      <line>
+        \\        <count>2</count>
+        \\      </line>
+        \\      <line>
+        \\        <count>1</count>
+        \\      </line>
+        \\    </clues>
+        \\    <solution>
+        \\      <image>
+        \\|X.|
+        \\|XX|
+        \\</image>
+        \\    </solution>
+        \\    <solution type="saved">
+        \\      <image>
+        \\|??|
+        \\|XX|
+        \\</image>
+        \\    </solution>
+        \\  </puzzle>
+        \\</puzzleset>
+        \\
+    );
+}
+
+test "parse and render - simple puzzle with no explicit clues" {
+    try testParseAndRender(
+        \\<puzzleset>
+        \\  <title>Test puzzle set</title>
+        \\  <author>Ian Johnson</author>
+        \\  <copyright>Public domain</copyright>
+        \\  <puzzle>
+        \\    <title>Test puzzle</title>
         \\    <solution type="goal">
         \\      <image>| X . | | [X] X |</image>
         \\    </solution>
