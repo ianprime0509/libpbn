@@ -309,7 +309,7 @@ pub fn main() !void {
 
     const raw = try std.fs.cwd().readFileAlloc(gpa, args[1], 4 * 1024 * 1024);
     defer gpa.free(raw);
-    var diag: PuzzleSet.Diagnostics = .init(gpa);
+    var diag: Diagnostics = .init(gpa);
     defer diag.deinit();
     var ps = try PuzzleSet.parse(gpa, raw, &diag);
     defer ps.deinit(gpa);
