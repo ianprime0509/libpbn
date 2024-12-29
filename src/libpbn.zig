@@ -81,36 +81,39 @@ pub const PuzzleSet = struct {
     }
 
     pub fn source(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
-        return ps.stringProperty(puzzle, .source);
+        return ps.optionalString(ps.puzzles.items[@intFromEnum(puzzle)].source) orelse
+            ps.optionalString(ps.puzzles.items[0].source);
     }
 
     pub fn id(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
-        return ps.stringProperty(puzzle, .id);
+        return ps.optionalString(ps.puzzles.items[@intFromEnum(puzzle)].id);
     }
 
     pub fn title(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
-        const value = ps.string(ps.puzzles.items(.title)[@intFromEnum(puzzle)]);
-        return if (value.len != 0) value else null;
+        return ps.optionalString(ps.puzzles.items[@intFromEnum(puzzle)].title);
     }
 
     pub fn author(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
-        return ps.stringProperty(puzzle, .author);
+        return ps.optionalString(ps.puzzles.items[@intFromEnum(puzzle)].author) orelse
+            ps.optionalString(ps.puzzles.items[0].author);
     }
 
     pub fn authorId(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
-        return ps.stringProperty(puzzle, .author_id);
+        return ps.optionalString(ps.puzzles.items[@intFromEnum(puzzle)].author_id) orelse
+            ps.optionalString(ps.puzzles.items[0].author_id);
     }
 
     pub fn copyright(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
-        return ps.stringProperty(puzzle, .copyright);
+        return ps.optionalString(ps.puzzles.items[@intFromEnum(puzzle)].copyright) orelse
+            ps.optionalString(ps.puzzles.items[0].copyright);
     }
 
     pub fn description(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
-        return ps.stringProperty(puzzle, .description);
+        return ps.optionalString(ps.puzzles.items[@intFromEnum(puzzle)].description);
     }
 
     pub fn colorCount(ps: PuzzleSet, puzzle: Puzzle.Index) usize {
-        const colors = ps.puzzles.items(.colors)[@intFromEnum(puzzle)];
+        const colors = ps.puzzles.items[@intFromEnum(puzzle)].colors;
         return ps.dataSliceLen(colors);
     }
 
@@ -119,61 +122,50 @@ pub const PuzzleSet = struct {
     }
 
     pub fn color(ps: PuzzleSet, puzzle: Puzzle.Index, index: Color.Index) Color {
-        const colors = ps.puzzles.items(.colors)[@intFromEnum(puzzle)];
+        const colors = ps.puzzles.items[@intFromEnum(puzzle)].colors;
         return ps.dataSliceElem(Color, colors, @intFromEnum(index));
     }
 
     pub fn rowCount(ps: PuzzleSet, puzzle: Puzzle.Index) usize {
-        const row_clues = ps.puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+        const row_clues = ps.puzzles.items[@intFromEnum(puzzle)].row_clues;
         return ps.dataSliceLen(row_clues);
     }
 
     pub fn rowClueCount(ps: PuzzleSet, puzzle: Puzzle.Index, row: ClueLine.Index) usize {
-        const row_clues = ps.puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+        const row_clues = ps.puzzles.items[@intFromEnum(puzzle)].row_clues;
         const line = ps.dataSliceElem(ClueLine, row_clues, @intFromEnum(row));
         return ps.dataSliceLen(line.clues);
     }
 
     pub fn rowClue(ps: PuzzleSet, puzzle: Puzzle.Index, row: ClueLine.Index, n: Clue.Index) Clue {
-        const row_clues = ps.puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+        const row_clues = ps.puzzles.items[@intFromEnum(puzzle)].row_clues;
         const line = ps.dataSliceElem(ClueLine, row_clues, @intFromEnum(row));
         return ps.dataSliceElem(Clue, line.clues, @intFromEnum(n));
     }
 
     pub fn columnCount(ps: PuzzleSet, puzzle: Puzzle.Index) usize {
-        const column_clues = ps.puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+        const column_clues = ps.puzzles.items[@intFromEnum(puzzle)].column_clues;
         return ps.dataSliceLen(column_clues);
     }
 
     pub fn columnClueCount(ps: PuzzleSet, puzzle: Puzzle.Index, column: ClueLine.Index) usize {
-        const column_clues = ps.puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+        const column_clues = ps.puzzles.items[@intFromEnum(puzzle)].column_clues;
         const line = ps.dataSliceElem(ClueLine, column_clues, @intFromEnum(column));
         return ps.dataSliceLen(line.clues);
     }
 
     pub fn columnClue(ps: PuzzleSet, puzzle: Puzzle.Index, column: ClueLine.Index, n: Clue.Index) Clue {
-        const column_clues = ps.puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+        const column_clues = ps.puzzles.items[@intFromEnum(puzzle)].column_clues;
         const line = ps.dataSliceElem(ClueLine, column_clues, @intFromEnum(column));
         return ps.dataSliceElem(Clue, line.clues, @intFromEnum(n));
     }
 
-    pub fn goalCount(ps: PuzzleSet, puzzle: Puzzle.Index) usize {
-        const goals = ps.puzzles.items(.goals)[@intFromEnum(puzzle)];
-        return ps.dataSliceLen(goals);
-    }
-
-    pub fn goal(ps: PuzzleSet, puzzle: Puzzle.Index, solution: Solution.Index) Solution {
-        const goals = ps.puzzles.items(.goals)[@intFromEnum(puzzle)];
-        return ps.dataSliceElem(Solution, goals, @intFromEnum(solution));
-    }
-
     pub fn getOrAddSavedSolution(ps: *PuzzleSet, gpa: Allocator, puzzle: Puzzle.Index) Allocator.Error!Solution.Index {
-        const puzzles = ps.puzzles.slice();
-        const saved_solutions = puzzles.items(.saved_solutions)[@intFromEnum(puzzle)];
+        const saved_solutions = ps.puzzles.items[@intFromEnum(puzzle)].saved_solutions;
         if (ps.dataSliceLen(saved_solutions) == 0) {
-            const row_clues = puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+            const row_clues = ps.puzzles.items[@intFromEnum(puzzle)].row_clues;
             const n_rows = ps.dataSliceLen(row_clues);
-            const column_clues = puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+            const column_clues = ps.puzzles.items[@intFromEnum(puzzle)].column_clues;
             const n_columns = ps.dataSliceLen(column_clues);
             const image_len = n_rows * n_columns;
             try ps.datas.ensureUnusedCapacity(gpa, image_len + 1 + dataSizeOf(Solution));
@@ -184,18 +176,17 @@ pub const PuzzleSet = struct {
                 .image = image_index,
                 .notes = .empty_slice,
             };
-            puzzles.items(.saved_solutions)[@intFromEnum(puzzle)] = ps.addDataSliceAssumeCapacity(Solution, &.{new_solution});
+            ps.puzzles.items[@intFromEnum(puzzle)].saved_solutions = ps.addDataSliceAssumeCapacity(Solution, &.{new_solution});
         }
         return @enumFromInt(0);
     }
 
     pub fn savedSolutionImage(ps: PuzzleSet, puzzle: Puzzle.Index, solution: Solution.Index) Image {
-        const puzzles = ps.puzzles.slice();
-        const row_clues = puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+        const row_clues = ps.puzzles.items[@intFromEnum(puzzle)].row_clues;
         const n_rows = ps.dataSliceLen(row_clues);
-        const column_clues = puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+        const column_clues = ps.puzzles.items[@intFromEnum(puzzle)].column_clues;
         const n_columns = ps.dataSliceLen(column_clues);
-        const saved_solutions = puzzles.items(.saved_solutions)[@intFromEnum(puzzle)];
+        const saved_solutions = ps.puzzles.items[@intFromEnum(puzzle)].saved_solutions;
         return .{
             .puzzle = puzzle,
             .index = ps.dataSliceElem(Solution, saved_solutions, @intFromEnum(solution)).image,
@@ -214,15 +205,6 @@ pub const PuzzleSet = struct {
 
     pub fn imageClear(ps: *PuzzleSet, image: Image) void {
         @memset(ps.datas.items[@intFromEnum(image.index)..][0 .. image.rows * image.columns], ps.colorMask(image.puzzle));
-    }
-
-    fn stringProperty(ps: PuzzleSet, puzzle: Puzzle.Index, comptime field: std.meta.FieldEnum(Puzzle)) ?[:0]const u8 {
-        const items = ps.puzzles.items(field);
-        const value = ps.string(items[@intFromEnum(puzzle)]);
-        if (value.len > 0) return value;
-        const root_value = ps.string(items[0]);
-        if (root_value.len > 0) return root_value;
-        return null;
     }
 
     pub fn parse(gpa: Allocator, pbn_xml: []const u8, diag: *Diagnostics) ParseError!PuzzleSet {
@@ -375,6 +357,11 @@ pub const PuzzleSet = struct {
         return std.mem.span(ptr);
     }
 
+    pub fn optionalString(ps: PuzzleSet, s: StringIndex) ?[:0]const u8 {
+        const value = ps.string(s);
+        return if (value.len != 0) value else null;
+    }
+
     pub fn addString(ps: *PuzzleSet, gpa: Allocator, s: []const u8) !StringIndex {
         const index: StringIndex = @enumFromInt(ps.strings.items.len);
         try ps.strings.ensureUnusedCapacity(gpa, s.len + 1);
@@ -405,7 +392,7 @@ pub const Puzzle = struct {
         _,
     };
 
-    pub const List = std.MultiArrayList(Puzzle);
+    pub const List = std.ArrayListUnmanaged(Puzzle);
 };
 
 pub const Color = struct {

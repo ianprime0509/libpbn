@@ -96,7 +96,7 @@ pub fn parse(p: Parse) anyerror!void {
         }
     }
 
-    p.ps.puzzles.set(0, .{
+    p.ps.puzzles.items[0] = .{
         .source = source,
         .id = .empty,
         .title = title,
@@ -111,7 +111,7 @@ pub fn parse(p: Parse) anyerror!void {
         .solved_solutions = .empty_slice,
         .saved_solutions = .empty_slice,
         .notes = .empty_slice,
-    });
+    };
 }
 
 fn readPuzzle(p: Parse) !?Puzzle {

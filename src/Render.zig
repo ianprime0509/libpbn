@@ -10,7 +10,6 @@ const DataIndex = @import("libpbn.zig").DataIndex;
 const StringIndex = @import("libpbn.zig").StringIndex;
 
 ps: PuzzleSet,
-puzzles: Puzzle.List.Slice,
 writer: *xml.Writer,
 
 const Render = @This();
@@ -18,7 +17,6 @@ const Render = @This();
 pub fn init(ps: PuzzleSet, writer: *xml.Writer) Render {
     return .{
         .ps = ps,
-        .puzzles = ps.puzzles.slice(),
         .writer = writer,
     };
 }
@@ -26,24 +24,24 @@ pub fn init(ps: PuzzleSet, writer: *xml.Writer) Render {
 pub fn render(r: Render) anyerror!void {
     try r.writer.xmlDeclaration("UTF-8", true);
     try r.writer.elementStart("puzzleset");
-    try r.renderStringElement("source", r.puzzles.items(.source)[0]);
-    try r.renderStringElement("title", r.puzzles.items(.title)[0]);
-    try r.renderStringElement("author", r.puzzles.items(.author)[0]);
-    try r.renderStringElement("authorid", r.puzzles.items(.author_id)[0]);
-    try r.renderStringElement("copyright", r.puzzles.items(.copyright)[0]);
-    for (1..r.ps.puzzles.len) |i| {
+    try r.renderStringElement("source", r.ps.puzzles.items[0].source);
+    try r.renderStringElement("title", r.ps.puzzles.items[0].title);
+    try r.renderStringElement("author", r.ps.puzzles.items[0].author);
+    try r.renderStringElement("authorid", r.ps.puzzles.items[0].author_id);
+    try r.renderStringElement("copyright", r.ps.puzzles.items[0].copyright);
+    for (1..r.ps.puzzles.items.len) |i| {
         try r.renderPuzzle(@enumFromInt(i));
     }
-    try r.renderNotes(r.puzzles.items(.notes)[0]);
+    try r.renderNotes(r.ps.puzzles.items[0].notes);
     try r.writer.elementEnd();
     try r.writer.sink.write("\n");
 }
 
 fn renderPuzzle(r: Render, puzzle: Puzzle.Index) !void {
-    const colors = r.puzzles.items(.colors)[@intFromEnum(puzzle)];
-    const row_clues = r.puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+    const colors = r.ps.puzzles.items[@intFromEnum(puzzle)].colors;
+    const row_clues = r.ps.puzzles.items[@intFromEnum(puzzle)].row_clues;
     const n_rows = r.ps.dataSliceLen(row_clues);
-    const column_clues = r.puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+    const column_clues = r.ps.puzzles.items[@intFromEnum(puzzle)].column_clues;
     const n_columns = r.ps.dataSliceLen(column_clues);
 
     try r.writer.elementStart("puzzle");
@@ -57,20 +55,20 @@ fn renderPuzzle(r: Render, puzzle: Puzzle.Index) !void {
     if (!std.mem.eql(u8, background_color_name, "white")) {
         try r.writer.attribute("backgroundcolor", background_color_name);
     }
-    try r.renderStringElement("source", r.puzzles.items(.source)[@intFromEnum(puzzle)]);
-    try r.renderStringElement("id", r.puzzles.items(.id)[@intFromEnum(puzzle)]);
-    try r.renderStringElement("title", r.puzzles.items(.title)[@intFromEnum(puzzle)]);
-    try r.renderStringElement("author", r.puzzles.items(.author)[@intFromEnum(puzzle)]);
-    try r.renderStringElement("authorid", r.puzzles.items(.author_id)[@intFromEnum(puzzle)]);
-    try r.renderStringElement("copyright", r.puzzles.items(.copyright)[@intFromEnum(puzzle)]);
-    try r.renderStringElement("description", r.puzzles.items(.description)[@intFromEnum(puzzle)]);
+    try r.renderStringElement("source", r.ps.puzzles.items[@intFromEnum(puzzle)].source);
+    try r.renderStringElement("id", r.ps.puzzles.items[@intFromEnum(puzzle)].id);
+    try r.renderStringElement("title", r.ps.puzzles.items[@intFromEnum(puzzle)].title);
+    try r.renderStringElement("author", r.ps.puzzles.items[@intFromEnum(puzzle)].author);
+    try r.renderStringElement("authorid", r.ps.puzzles.items[@intFromEnum(puzzle)].author_id);
+    try r.renderStringElement("copyright", r.ps.puzzles.items[@intFromEnum(puzzle)].copyright);
+    try r.renderStringElement("description", r.ps.puzzles.items[@intFromEnum(puzzle)].description);
     try r.renderColors(colors);
     try r.renderClues(row_clues, .rows, colors);
     try r.renderClues(column_clues, .columns, colors);
-    try r.renderSolutions(r.puzzles.items(.goals)[@intFromEnum(puzzle)], .goal, n_rows, n_columns, colors);
-    try r.renderSolutions(r.puzzles.items(.solved_solutions)[@intFromEnum(puzzle)], .solution, n_rows, n_columns, colors);
-    try r.renderSolutions(r.puzzles.items(.saved_solutions)[@intFromEnum(puzzle)], .saved, n_rows, n_columns, colors);
-    try r.renderNotes(r.puzzles.items(.notes)[@intFromEnum(puzzle)]);
+    try r.renderSolutions(r.ps.puzzles.items[@intFromEnum(puzzle)].goals, .goal, n_rows, n_columns, colors);
+    try r.renderSolutions(r.ps.puzzles.items[@intFromEnum(puzzle)].solved_solutions, .solution, n_rows, n_columns, colors);
+    try r.renderSolutions(r.ps.puzzles.items[@intFromEnum(puzzle)].saved_solutions, .saved, n_rows, n_columns, colors);
+    try r.renderNotes(r.ps.puzzles.items[@intFromEnum(puzzle)].notes);
     try r.writer.elementEnd();
 }
 
