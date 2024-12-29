@@ -178,7 +178,7 @@ pub const PuzzleSet = struct {
             const image_len = n_rows * n_columns;
             try ps.datas.ensureUnusedCapacity(gpa, image_len + 1 + dataSizeOf(Solution));
             const image_index: DataIndex = @enumFromInt(ps.datas.items.len);
-            @memset(ps.datas.addManyAsSliceAssumeCapacity(n_rows), ps.colorMask(puzzle));
+            @memset(ps.datas.addManyAsSliceAssumeCapacity(n_rows * n_columns), ps.colorMask(puzzle));
             const new_solution: Solution = .{
                 .id = .empty,
                 .image = image_index,
