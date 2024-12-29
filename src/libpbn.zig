@@ -1,6 +1,7 @@
 const std = @import("std");
 const xml = @import("xml");
 const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 
 const Parse = @import("Parse.zig");
 const Render = @import("Render.zig");
@@ -79,6 +80,151 @@ pub const PuzzleSet = struct {
         ps.* = undefined;
     }
 
+    pub fn source(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
+        return ps.stringProperty(puzzle, .source);
+    }
+
+    pub fn id(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
+        return ps.stringProperty(puzzle, .id);
+    }
+
+    pub fn title(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
+        const value = ps.string(ps.puzzles.items(.title)[@intFromEnum(puzzle)]);
+        return if (value.len != 0) value else null;
+    }
+
+    pub fn author(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
+        return ps.stringProperty(puzzle, .author);
+    }
+
+    pub fn authorId(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
+        return ps.stringProperty(puzzle, .author_id);
+    }
+
+    pub fn copyright(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
+        return ps.stringProperty(puzzle, .copyright);
+    }
+
+    pub fn description(ps: PuzzleSet, puzzle: Puzzle.Index) ?[:0]const u8 {
+        return ps.stringProperty(puzzle, .description);
+    }
+
+    pub fn colorCount(ps: PuzzleSet, puzzle: Puzzle.Index) usize {
+        const colors = ps.puzzles.items(.colors)[@intFromEnum(puzzle)];
+        return ps.dataSliceLen(colors);
+    }
+
+    pub fn colorMask(ps: PuzzleSet, puzzle: Puzzle.Index) u32 {
+        return @intCast((@as(u32, 1) << @intCast(ps.colorCount(puzzle))) - 1);
+    }
+
+    pub fn color(ps: PuzzleSet, puzzle: Puzzle.Index, index: Color.Index) Color {
+        const colors = ps.puzzles.items(.colors)[@intFromEnum(puzzle)];
+        return ps.dataSliceElem(Color, colors, @intFromEnum(index));
+    }
+
+    pub fn rowCount(ps: PuzzleSet, puzzle: Puzzle.Index) usize {
+        const row_clues = ps.puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+        return ps.dataSliceLen(row_clues);
+    }
+
+    pub fn rowClueCount(ps: PuzzleSet, puzzle: Puzzle.Index, row: ClueLine.Index) usize {
+        const row_clues = ps.puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+        const line = ps.dataSliceElem(ClueLine, row_clues, @intFromEnum(row));
+        return ps.dataSliceLen(line.clues);
+    }
+
+    pub fn rowClue(ps: PuzzleSet, puzzle: Puzzle.Index, row: ClueLine.Index, n: Clue.Index) Clue {
+        const row_clues = ps.puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+        const line = ps.dataSliceElem(ClueLine, row_clues, @intFromEnum(row));
+        return ps.dataSliceElem(Clue, line.clues, @intFromEnum(n));
+    }
+
+    pub fn columnCount(ps: PuzzleSet, puzzle: Puzzle.Index) usize {
+        const column_clues = ps.puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+        return ps.dataSliceLen(column_clues);
+    }
+
+    pub fn columnClueCount(ps: PuzzleSet, puzzle: Puzzle.Index, column: ClueLine.Index) usize {
+        const column_clues = ps.puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+        const line = ps.dataSliceElem(ClueLine, column_clues, @intFromEnum(column));
+        return ps.dataSliceLen(line.clues);
+    }
+
+    pub fn columnClue(ps: PuzzleSet, puzzle: Puzzle.Index, column: ClueLine.Index, n: Clue.Index) Clue {
+        const column_clues = ps.puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+        const line = ps.dataSliceElem(ClueLine, column_clues, @intFromEnum(column));
+        return ps.dataSliceElem(Clue, line.clues, @intFromEnum(n));
+    }
+
+    pub fn goalCount(ps: PuzzleSet, puzzle: Puzzle.Index) usize {
+        const goals = ps.puzzles.items(.goals)[@intFromEnum(puzzle)];
+        return ps.dataSliceLen(goals);
+    }
+
+    pub fn goal(ps: PuzzleSet, puzzle: Puzzle.Index, solution: Solution.Index) Solution {
+        const goals = ps.puzzles.items(.goals)[@intFromEnum(puzzle)];
+        return ps.dataSliceElem(Solution, goals, @intFromEnum(solution));
+    }
+
+    pub fn getOrAddSavedSolution(ps: *PuzzleSet, gpa: Allocator, puzzle: Puzzle.Index) Allocator.Error!Solution.Index {
+        const puzzles = ps.puzzles.slice();
+        const saved_solutions = puzzles.items(.saved_solutions)[@intFromEnum(puzzle)];
+        if (ps.dataSliceLen(saved_solutions) == 0) {
+            const row_clues = puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+            const n_rows = ps.dataSliceLen(row_clues);
+            const column_clues = puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+            const n_columns = ps.dataSliceLen(column_clues);
+            const image_len = n_rows * n_columns;
+            try ps.datas.ensureUnusedCapacity(gpa, image_len + 1 + dataSizeOf(Solution));
+            const image_index: DataIndex = @enumFromInt(ps.datas.items.len);
+            @memset(ps.datas.addManyAsSliceAssumeCapacity(n_rows), ps.colorMask(puzzle));
+            const new_solution: Solution = .{
+                .id = .empty,
+                .image = image_index,
+                .notes = .empty_slice,
+            };
+            puzzles.items(.saved_solutions)[@intFromEnum(puzzle)] = ps.addDataSliceAssumeCapacity(Solution, &.{new_solution});
+        }
+        return @enumFromInt(0);
+    }
+
+    pub fn savedSolutionImage(ps: PuzzleSet, puzzle: Puzzle.Index, solution: Solution.Index) Image {
+        const puzzles = ps.puzzles.slice();
+        const row_clues = puzzles.items(.row_clues)[@intFromEnum(puzzle)];
+        const n_rows = ps.dataSliceLen(row_clues);
+        const column_clues = puzzles.items(.column_clues)[@intFromEnum(puzzle)];
+        const n_columns = ps.dataSliceLen(column_clues);
+        const saved_solutions = puzzles.items(.saved_solutions)[@intFromEnum(puzzle)];
+        return .{
+            .puzzle = puzzle,
+            .index = ps.dataSliceElem(Solution, saved_solutions, @intFromEnum(solution)).image,
+            .rows = n_rows,
+            .columns = n_columns,
+        };
+    }
+
+    pub fn imageGet(ps: PuzzleSet, image: Image, row: usize, column: usize) Cell {
+        return @enumFromInt(ps.datas.items[@intFromEnum(image.cellIndex(row, column))]);
+    }
+
+    pub fn imageSet(ps: *PuzzleSet, image: Image, row: usize, column: usize, cell: Cell) void {
+        ps.datas.items[@intFromEnum(image.cellIndex(row, column))] = @intFromEnum(cell) & ps.colorMask(image.puzzle);
+    }
+
+    pub fn imageClear(ps: *PuzzleSet, image: Image) void {
+        @memset(ps.datas.items[@intFromEnum(image.index)..][0 .. image.rows * image.columns], ps.colorMask(image.puzzle));
+    }
+
+    fn stringProperty(ps: PuzzleSet, puzzle: Puzzle.Index, comptime field: std.meta.FieldEnum(Puzzle)) ?[:0]const u8 {
+        const items = ps.puzzles.items(field);
+        const value = ps.string(items[@intFromEnum(puzzle)]);
+        if (value.len > 0) return value;
+        const root_value = ps.string(items[0]);
+        if (root_value.len > 0) return root_value;
+        return null;
+    }
+
     pub fn parse(gpa: Allocator, pbn_xml: []const u8, diag: *Diagnostics) ParseError!PuzzleSet {
         var doc: xml.StaticDocument = .init(pbn_xml);
         var reader = doc.reader(gpa, .{
@@ -139,12 +285,20 @@ pub const PuzzleSet = struct {
         try r.render();
     }
 
-    pub fn dataSizeOf(comptime T: type) usize {
+    pub inline fn dataSizeOf(comptime T: type) usize {
         return @divExact(@bitSizeOf(T), 32);
     }
 
+    inline fn dataIsPrimitive(comptime T: type) bool {
+        return switch (@typeInfo(T)) {
+            .@"enum" => true,
+            .@"struct" => |@"struct"| @"struct".layout == .@"packed",
+            else => false,
+        };
+    }
+
     pub fn data(ps: PuzzleSet, comptime T: type, index: DataIndex) T {
-        if (@bitSizeOf(T) == 32) {
+        if (dataIsPrimitive(T)) {
             return fromData(T, ps.datas.items[@intFromEnum(index)]);
         } else {
             var value: T = undefined;
@@ -190,9 +344,13 @@ pub const PuzzleSet = struct {
 
     pub fn addDataSlice(ps: *PuzzleSet, gpa: Allocator, comptime T: type, slice: []const T) !DataIndex {
         try ps.datas.ensureUnusedCapacity(gpa, dataSizeOf(T) * slice.len + 1);
+        return ps.addDataSliceAssumeCapacity(T, slice);
+    }
+
+    pub fn addDataSliceAssumeCapacity(ps: *PuzzleSet, comptime T: type, slice: []const T) DataIndex {
         const index: DataIndex = @enumFromInt(ps.datas.items.len);
         ps.datas.appendAssumeCapacity(@intCast(slice.len));
-        if (@bitSizeOf(T) == 32) {
+        if (dataIsPrimitive(T)) {
             ps.datas.appendSliceAssumeCapacity(@ptrCast(slice));
         } else {
             for (slice) |value| {
@@ -264,6 +422,24 @@ pub const Color = struct {
         default = 1,
         _,
     };
+
+    pub fn rgb(color: Color) struct { u8, u8, u8 } {
+        return .{ color.desc.r, color.desc.g, color.desc.b };
+    }
+
+    pub fn rgbFloat(color: Color) struct { f32, f32, f32 } {
+        return .{
+            @as(f32, @floatFromInt(color.desc.r)) / 255.0,
+            @as(f32, @floatFromInt(color.desc.g)) / 255.0,
+            @as(f32, @floatFromInt(color.desc.b)) / 255.0,
+        };
+    }
+};
+
+pub const ClueLine = struct {
+    clues: DataIndex,
+
+    pub const Index = enum(u32) { _ };
 };
 
 pub const Clue = packed struct(u32) {
@@ -274,6 +450,8 @@ pub const Clue = packed struct(u32) {
         rows,
         columns,
     };
+
+    pub const Index = enum(u32) { _ };
 };
 
 pub const Solution = struct {
@@ -286,6 +464,28 @@ pub const Solution = struct {
         solution,
         saved,
     };
+
+    pub const Index = enum(u32) { _ };
+};
+
+pub const Image = struct {
+    puzzle: Puzzle.Index,
+    index: DataIndex,
+    rows: usize,
+    columns: usize,
+
+    pub fn cellIndex(image: Image, row: usize, column: usize) DataIndex {
+        assert(row < image.rows and column < image.columns);
+        return @enumFromInt(@intFromEnum(image.index) + image.columns * row + column);
+    }
+};
+
+pub const Cell = enum(u32) {
+    _,
+
+    pub fn only(color: Color.Index) Cell {
+        return @enumFromInt(@as(u32, 1) << @intFromEnum(color));
+    }
 };
 
 pub const DataIndex = enum(u32) {
