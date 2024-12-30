@@ -77,16 +77,17 @@ pub const PuzzleSet = struct {
     images: Cell.List,
     notes: Note.List,
     strings: std.ArrayListUnmanaged(u8),
+    gpa: Allocator,
 
-    pub fn deinit(ps: *PuzzleSet, gpa: Allocator) void {
-        ps.puzzles.deinit(gpa);
-        ps.colors.deinit(gpa);
-        ps.clue_lines.deinit(gpa);
-        ps.clues.deinit(gpa);
-        ps.solutions.deinit(gpa);
-        ps.images.deinit(gpa);
-        ps.notes.deinit(gpa);
-        ps.strings.deinit(gpa);
+    pub fn deinit(ps: *PuzzleSet) void {
+        ps.puzzles.deinit(ps.gpa);
+        ps.colors.deinit(ps.gpa);
+        ps.clue_lines.deinit(ps.gpa);
+        ps.clues.deinit(ps.gpa);
+        ps.solutions.deinit(ps.gpa);
+        ps.images.deinit(ps.gpa);
+        ps.notes.deinit(ps.gpa);
+        ps.strings.deinit(ps.gpa);
         ps.* = undefined;
     }
 
@@ -162,16 +163,16 @@ pub const PuzzleSet = struct {
         return ps.data(line.clues, n);
     }
 
-    pub fn getOrAddSavedSolution(ps: *PuzzleSet, gpa: Allocator, puzzle: Puzzle.Index) Allocator.Error!Solution.Index {
+    pub fn getOrAddSavedSolution(ps: *PuzzleSet, puzzle: Puzzle.Index) Allocator.Error!Solution.Index {
         const p = &ps.puzzles.items[@intFromEnum(puzzle)];
         if (p.saved_solutions.len == 0) {
             const n_rows = p.row_clues.len;
             const n_columns = p.column_clues.len;
             const image_index: Cell.Index = @enumFromInt(ps.images.items.len);
-            @memset(try ps.images.addManyAsSlice(gpa, n_rows * n_columns), ps.colorMask(puzzle));
+            @memset(try ps.images.addManyAsSlice(ps.gpa, n_rows * n_columns), ps.colorMask(puzzle));
 
             const new_solutions_base: u32 = @intCast(ps.solutions.items.len);
-            try ps.solutions.append(gpa, .{
+            try ps.solutions.append(ps.gpa, .{
                 .id = .empty,
                 .image = image_index,
                 .notes = .empty,
@@ -214,7 +215,7 @@ pub const PuzzleSet = struct {
             error.MalformedXml => return diag.fatal(.{ .xml = reader.errorCode() }, reader.errorLocation()),
             else => |other| return @as(ParseError, @errorCast(other)),
         };
-        errdefer puzzle_set.deinit(gpa);
+        errdefer puzzle_set.deinit();
         if (diag.errors.items.len > 0) return error.InvalidPbn;
         return puzzle_set;
     }
@@ -231,7 +232,7 @@ pub const PuzzleSet = struct {
             error.MalformedXml => return diag.fatal(.{ .xml = reader.errorCode() }, reader.errorLocation()),
             else => |other| return @as(ParseError || @TypeOf(pbn_xml).Error, @errorCast(other)),
         };
-        errdefer puzzle_set.deinit(gpa);
+        errdefer puzzle_set.deinit();
         if (diag.errors.items.len > 0) return error.InvalidPbn;
         return puzzle_set;
     }
@@ -246,9 +247,10 @@ pub const PuzzleSet = struct {
             .images = .empty,
             .notes = .empty,
             .strings = .empty,
+            .gpa = gpa,
         };
-        errdefer ps.deinit(gpa);
-        const p: Parse = try .init(gpa, &ps, reader, diag);
+        errdefer ps.deinit();
+        const p: Parse = try .init(&ps, reader, diag);
         try p.parse();
         return ps;
     }
@@ -285,7 +287,7 @@ pub const PuzzleSet = struct {
         return list.items[slice.base..][0..slice.len];
     }
 
-    pub fn addDataSlice(ps: *PuzzleSet, gpa: Allocator, comptime T: type, items: []const T) Allocator.Error!DataSlice(T) {
+    pub fn addDataSlice(ps: *PuzzleSet, comptime T: type, items: []const T) Allocator.Error!DataSlice(T) {
         const list = switch (T) {
             Color => &ps.colors,
             ClueLine => &ps.clue_lines,
@@ -296,7 +298,7 @@ pub const PuzzleSet = struct {
             else => comptime unreachable, // invalid data slice type
         };
         const base: u32 = @intCast(list.items.len);
-        try list.appendSlice(gpa, items);
+        try list.appendSlice(ps.gpa, items);
         return .{ .base = base, .len = @intCast(items.len) };
     }
 
@@ -310,9 +312,9 @@ pub const PuzzleSet = struct {
         return if (value.len != 0) value else null;
     }
 
-    pub fn addString(ps: *PuzzleSet, gpa: Allocator, s: []const u8) !StringIndex {
+    pub fn addString(ps: *PuzzleSet, s: []const u8) !StringIndex {
         const index: StringIndex = @enumFromInt(ps.strings.items.len);
-        try ps.strings.ensureUnusedCapacity(gpa, s.len + 1);
+        try ps.strings.ensureUnusedCapacity(ps.gpa, s.len + 1);
         ps.strings.appendSliceAssumeCapacity(s);
         ps.strings.appendAssumeCapacity(0);
         return index;
@@ -474,7 +476,7 @@ pub fn main() !void {
     var diag: Diagnostics = .init(gpa);
     defer diag.deinit();
     var ps = try PuzzleSet.parse(gpa, raw, &diag);
-    defer ps.deinit(gpa);
+    defer ps.deinit();
 
     var stdout_buf = std.io.bufferedWriter(std.io.getStdOut().writer());
     try ps.render(gpa, stdout_buf.writer());
@@ -623,7 +625,7 @@ fn testParseAndRender(input: []const u8, expected_output: []const u8) !void {
         },
         else => |other| return other,
     };
-    defer ps.deinit(gpa);
+    defer ps.deinit();
     try std.testing.expectEqual(0, diag.errors.items.len);
 
     var output: std.ArrayListUnmanaged(u8) = .empty;

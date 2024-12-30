@@ -19,22 +19,20 @@ const StringIndex = @import("libpbn.zig").StringIndex;
 ps: *PuzzleSet,
 reader: *xml.Reader,
 diag: *Diagnostics,
-gpa: Allocator,
 
 const Parse = @This();
 
-pub fn init(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagnostics) Allocator.Error!Parse {
+pub fn init(ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagnostics) Allocator.Error!Parse {
     // The puzzle set data is represented as the "root" puzzle, which will be
     // initialized later.
-    try ps.puzzles.append(gpa, undefined);
+    try ps.puzzles.append(ps.gpa, undefined);
     // The empty string must reside at index 0.
-    try ps.strings.append(gpa, 0);
+    try ps.strings.append(ps.gpa, 0);
 
     return .{
         .ps = ps,
         .reader = reader,
         .diag = diag,
-        .gpa = gpa,
     };
 }
 
@@ -45,7 +43,7 @@ pub fn parse(p: Parse) anyerror!void {
     var author_id: StringIndex = .empty;
     var copyright: StringIndex = .empty;
     var notes: std.ArrayListUnmanaged(StringIndex) = .empty;
-    defer notes.deinit(p.gpa);
+    defer notes.deinit(p.ps.gpa);
 
     try p.reader.skipProlog();
     if (!std.mem.eql(u8, p.reader.elementName(), "puzzleset")) {
@@ -87,12 +85,12 @@ pub fn parse(p: Parse) anyerror!void {
             },
             .puzzle => {
                 if (try p.readPuzzle()) |puzzle| {
-                    try p.ps.puzzles.append(p.gpa, puzzle);
+                    try p.ps.puzzles.append(p.ps.gpa, puzzle);
                 }
             },
             .note => {
                 try p.noAttributes();
-                try notes.append(p.gpa, try p.addElementString());
+                try notes.append(p.ps.gpa, try p.addElementString());
             },
         }
     }
@@ -124,24 +122,24 @@ fn readPuzzle(p: Parse) !?Puzzle {
     var copyright: StringIndex = .empty;
     var description: StringIndex = .empty;
     var colors: Color.List = .empty;
-    defer colors.deinit(p.gpa);
+    defer colors.deinit(p.ps.gpa);
     var row_clues: ClueLine.List = .empty;
-    defer row_clues.deinit(p.gpa);
+    defer row_clues.deinit(p.ps.gpa);
     var column_clues: ClueLine.List = .empty;
-    defer column_clues.deinit(p.gpa);
+    defer column_clues.deinit(p.ps.gpa);
     var goals: Solution.List = .empty;
-    defer goals.deinit(p.gpa);
+    defer goals.deinit(p.ps.gpa);
     var solved_solutions: Solution.List = .empty;
-    defer solved_solutions.deinit(p.gpa);
+    defer solved_solutions.deinit(p.ps.gpa);
     var saved_solutions: Solution.List = .empty;
-    defer saved_solutions.deinit(p.gpa);
+    defer saved_solutions.deinit(p.ps.gpa);
     var notes: Note.List = .empty;
-    defer notes.deinit(p.gpa);
+    defer notes.deinit(p.ps.gpa);
 
     // To avoid managing many smaller (and more difficult to manage)
     // allocations, all the "complex" intermediate parsing state is owned by an
     // arena.
-    var arena_state: std.heap.ArenaAllocator = .init(p.gpa);
+    var arena_state: std.heap.ArenaAllocator = .init(p.ps.gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     var default_color_name: []const u8 = "black";
@@ -215,7 +213,7 @@ fn readPuzzle(p: Parse) !?Puzzle {
                 description = try p.addElementString();
             },
             .color => {
-                try colors.append(p.gpa, try p.readColor());
+                try colors.append(p.ps.gpa, try p.readColor());
             },
             .clues => {
                 try p.readClues(arena, &parsed_clues, default_color_name);
@@ -227,7 +225,7 @@ fn readPuzzle(p: Parse) !?Puzzle {
             },
             .note => {
                 try p.noAttributes();
-                try notes.append(p.gpa, .{ .text = try p.addElementString() });
+                try notes.append(p.ps.gpa, .{ .text = try p.addElementString() });
             },
         }
     }
@@ -302,7 +300,7 @@ fn readPuzzle(p: Parse) !?Puzzle {
                 .solution => &solved_solutions,
                 .saved => &saved_solutions,
             };
-            try solutions.append(p.gpa, solution);
+            try solutions.append(p.ps.gpa, solution);
         } else |err| switch (err) {
             error.ImageMismatchedDimensions => try p.diag.addError(.image_mismatched_dimensions, location),
             error.SolutionIndeterminateImage => try p.diag.addError(.solution_indeterminate_image, location),
@@ -324,13 +322,13 @@ fn readPuzzle(p: Parse) !?Puzzle {
         .author_id = author_id,
         .copyright = copyright,
         .description = description,
-        .colors = try p.ps.addDataSlice(p.gpa, Color, colors.items),
-        .row_clues = try p.ps.addDataSlice(p.gpa, ClueLine, row_clues.items),
-        .column_clues = try p.ps.addDataSlice(p.gpa, ClueLine, column_clues.items),
-        .goals = try p.ps.addDataSlice(p.gpa, Solution, goals.items),
-        .solved_solutions = try p.ps.addDataSlice(p.gpa, Solution, solved_solutions.items),
-        .saved_solutions = try p.ps.addDataSlice(p.gpa, Solution, saved_solutions.items),
-        .notes = try p.ps.addDataSlice(p.gpa, Note, notes.items),
+        .colors = try p.ps.addDataSlice(Color, colors.items),
+        .row_clues = try p.ps.addDataSlice(ClueLine, row_clues.items),
+        .column_clues = try p.ps.addDataSlice(ClueLine, column_clues.items),
+        .goals = try p.ps.addDataSlice(Solution, goals.items),
+        .solved_solutions = try p.ps.addDataSlice(Solution, solved_solutions.items),
+        .saved_solutions = try p.ps.addDataSlice(Solution, saved_solutions.items),
+        .notes = try p.ps.addDataSlice(Note, notes.items),
     };
 }
 
@@ -342,7 +340,7 @@ fn readColor(p: Parse) !Color {
     while (try attrs.next()) |attr| {
         switch (attr.name) {
             .name => {
-                name = try p.ps.addString(p.gpa, try p.reader.attributeValue(attr.index));
+                name = try p.ps.addString(try p.reader.attributeValue(attr.index));
             },
             .char => {
                 const value = try p.reader.attributeValue(attr.index);
@@ -360,8 +358,8 @@ fn readColor(p: Parse) !Color {
     }
 
     const location = p.reader.location();
-    const value = try p.readElementTextAlloc(p.gpa);
-    defer p.gpa.free(value);
+    const value = try p.readElementTextAlloc(p.ps.gpa);
+    defer p.ps.gpa.free(value);
     const rgb: Rgb = Rgb.parse(value) orelse invalid: {
         try p.diag.addError(.color_invalid_rgb, location);
         break :invalid .{ .r = 0, .g = 0, .b = 0 };
@@ -390,8 +388,8 @@ fn addDefaultColors(p: Parse, colors: *std.ArrayListUnmanaged(Color)) !void {
         }
     }
     if (!found_black) {
-        try colors.append(p.gpa, .{
-            .name = try p.ps.addString(p.gpa, "black"),
+        try colors.append(p.ps.gpa, .{
+            .name = try p.ps.addString("black"),
             .desc = .{
                 .char = 'X',
                 .r = 0,
@@ -401,8 +399,8 @@ fn addDefaultColors(p: Parse, colors: *std.ArrayListUnmanaged(Color)) !void {
         });
     }
     if (!found_white) {
-        try colors.append(p.gpa, .{
-            .name = try p.ps.addString(p.gpa, "white"),
+        try colors.append(p.ps.gpa, .{
+            .name = try p.ps.addString("white"),
             .desc = .{
                 .char = '.',
                 .r = 255,
@@ -551,10 +549,10 @@ fn processClues(
     clues: *ClueLine.List,
     colors_by_name: std.StringArrayHashMapUnmanaged(Color.Index),
 ) !void {
-    try clues.ensureTotalCapacityPrecise(p.gpa, parsed_clues.len);
+    try clues.ensureTotalCapacityPrecise(p.ps.gpa, parsed_clues.len);
     for (parsed_clues) |parsed_line| {
         const line_base: u32 = @intCast(p.ps.clues.items.len);
-        try p.ps.clues.ensureUnusedCapacity(p.gpa, parsed_line.len);
+        try p.ps.clues.ensureUnusedCapacity(p.ps.gpa, parsed_line.len);
         for (parsed_line) |parsed_clue| {
             _ = p.ps.clues.appendAssumeCapacity(.{
                 .color = colors_by_name.get(parsed_clue.color_name) orelse return error.ColorUndefined,
@@ -588,7 +586,7 @@ fn readSolution(p: Parse, arena: Allocator) !?ParsedSolution {
                 try p.diag.addError(.solution_invalid_type, p.reader.attributeLocation(attr.index));
                 return null;
             },
-            .id => id = try p.ps.addString(p.gpa, try p.reader.attributeValue(attr.index)),
+            .id => id = try p.ps.addString(try p.reader.attributeValue(attr.index)),
         }
     }
 
@@ -685,7 +683,7 @@ fn processSolution(
     colors_by_char: std.AutoArrayHashMapUnmanaged(u8, Color.Index),
 ) !Solution {
     const image_index: Cell.Index = @enumFromInt(p.ps.images.items.len);
-    try p.ps.images.ensureUnusedCapacity(p.gpa, n_rows * n_columns);
+    try p.ps.images.ensureUnusedCapacity(p.ps.gpa, n_rows * n_columns);
     if (solution.image.len != n_rows) return error.ImageMismatchedDimensions;
     for (solution.image) |row| {
         if (row.len != n_columns) return error.ImageMismatchedDimensions;
@@ -697,7 +695,7 @@ fn processSolution(
     return .{
         .id = solution.id,
         .image = image_index,
-        .notes = try p.ps.addDataSlice(p.gpa, Note, solution.notes),
+        .notes = try p.ps.addDataSlice(Note, solution.notes),
     };
 }
 
@@ -730,9 +728,9 @@ fn deriveClues(
     // We have already validated that the image is a proper goal image, so that
     // each cell has exactly one bit set.
     var line: Clue.List = .empty;
-    defer line.deinit(p.gpa);
+    defer line.deinit(p.ps.gpa);
 
-    try row_clues.ensureTotalCapacityPrecise(p.gpa, n_rows);
+    try row_clues.ensureTotalCapacityPrecise(p.ps.gpa, n_rows);
     for (0..n_rows) |i| {
         line.clearRetainingCapacity();
 
@@ -744,7 +742,7 @@ fn deriveClues(
                 run_len += 1;
             } else {
                 if (run_color != .background) {
-                    try line.append(p.gpa, .{
+                    try line.append(p.ps.gpa, .{
                         .color = run_color,
                         .count = @intCast(run_len),
                     });
@@ -754,18 +752,18 @@ fn deriveClues(
             }
         }
         if (run_color != .background) {
-            try line.append(p.gpa, .{
+            try line.append(p.ps.gpa, .{
                 .color = run_color,
                 .count = @intCast(run_len),
             });
         }
 
         row_clues.appendAssumeCapacity(.{
-            .clues = try p.ps.addDataSlice(p.gpa, Clue, line.items),
+            .clues = try p.ps.addDataSlice(Clue, line.items),
         });
     }
 
-    try column_clues.ensureTotalCapacityPrecise(p.gpa, n_columns);
+    try column_clues.ensureTotalCapacityPrecise(p.ps.gpa, n_columns);
     for (0..n_columns) |j| {
         line.clearRetainingCapacity();
 
@@ -777,7 +775,7 @@ fn deriveClues(
                 run_len += 1;
             } else {
                 if (run_color != .background) {
-                    try line.append(p.gpa, .{
+                    try line.append(p.ps.gpa, .{
                         .color = run_color,
                         .count = @intCast(run_len),
                     });
@@ -787,14 +785,14 @@ fn deriveClues(
             }
         }
         if (run_color != .background) {
-            try line.append(p.gpa, .{
+            try line.append(p.ps.gpa, .{
                 .color = run_color,
                 .count = @intCast(run_len),
             });
         }
 
         column_clues.appendAssumeCapacity(.{
-            .clues = try p.ps.addDataSlice(p.gpa, Clue, line.items),
+            .clues = try p.ps.addDataSlice(Clue, line.items),
         });
     }
 }
@@ -883,9 +881,9 @@ fn AttributeIterator(comptime Name: type) type {
 
 fn addElementString(p: Parse) !StringIndex {
     const index: StringIndex = @enumFromInt(p.ps.strings.items.len);
-    var writer = p.ps.strings.writer(p.gpa);
+    var writer = p.ps.strings.writer(p.ps.gpa);
     try p.readElementTextWrite(writer.any());
-    try p.ps.strings.append(p.gpa, 0);
+    try p.ps.strings.append(p.ps.gpa, 0);
     return index;
 }
 
