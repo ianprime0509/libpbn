@@ -204,6 +204,60 @@ pub const PuzzleSet = struct {
         @memset(ps.images.items[@intFromEnum(image.index)..][0 .. image.rows * image.columns], ps.colorMask(image.puzzle));
     }
 
+    pub fn imageSolved(ps: PuzzleSet, image: Image) bool {
+        for (0..image.rows) |row| {
+            if (!ps.imageLineSolved(image, .row, @enumFromInt(row))) return false;
+        }
+        for (0..image.columns) |column| {
+            if (!ps.imageLineSolved(image, .column, @enumFromInt(column))) return false;
+        }
+        return true;
+    }
+
+    const LineDirection = enum { row, column };
+
+    fn imageLineSolved(ps: PuzzleSet, image: Image, dir: LineDirection, line: ClueLine.Index) bool {
+        const p = ps.puzzles.items[@intFromEnum(image.puzzle)];
+        const clues, const cross_len = switch (dir) {
+            .row => .{ ps.data(p.row_clues, line).clues, image.columns },
+            .column => .{ ps.data(p.column_clues, line).clues, image.rows },
+        };
+
+        var run_color: Color.Index = .background;
+        var run_len: usize = 0;
+        var current_clue: usize = 0;
+        for (0..cross_len) |n| {
+            const cell_index = imageLineIndex(image, dir, line, @enumFromInt(n));
+            const cell = ps.images.items[@intFromEnum(cell_index)];
+            const cell_color: Color.Index = if (cell.colorCount() == 1) cell.onlyColor() else .background;
+            if (cell_color != run_color) {
+                if (run_color != .background) {
+                    if (current_clue == clues.len) return false;
+                    const clue = ps.data(clues, @enumFromInt(current_clue));
+                    if (clue.color != run_color or clue.count != run_len) return false;
+                    current_clue += 1;
+                }
+                run_color = cell_color;
+                run_len = 0;
+            }
+            run_len += 1;
+        }
+        if (run_len > 0 and run_color != .background) {
+            if (current_clue == clues.len) return false;
+            const clue = ps.data(clues, @enumFromInt(current_clue));
+            if (clue.color != run_color or clue.count != run_len) return false;
+            current_clue += 1;
+        }
+        return current_clue == clues.len;
+    }
+
+    fn imageLineIndex(image: Image, dir: LineDirection, line: ClueLine.Index, n: Clue.Index) Cell.Index {
+        return switch (dir) {
+            .row => image.cellIndex(@intFromEnum(line), @intFromEnum(n)),
+            .column => image.cellIndex(@intFromEnum(n), @intFromEnum(line)),
+        };
+    }
+
     pub fn parse(gpa: Allocator, pbn_xml: []const u8, diag: *Diagnostics) ParseError!PuzzleSet {
         var doc: xml.StaticDocument = .init(pbn_xml);
         var reader = doc.reader(gpa, .{
@@ -435,6 +489,37 @@ pub const Cell = enum(u32) {
     pub fn only(color: Color.Index) Cell {
         return @enumFromInt(@as(u32, 1) << @intFromEnum(color));
     }
+
+    pub fn colorCount(cell: Cell) u6 {
+        return @popCount(@intFromEnum(cell));
+    }
+
+    pub fn iterator(cell: Cell) Iterator {
+        return .{ .remaining = @intFromEnum(cell) };
+    }
+
+    pub fn onlyColor(cell: Cell) Color.Index {
+        var iter = cell.iterator();
+        const color = iter.next().?;
+        assert(iter.next() == null);
+        return color;
+    }
+
+    pub const Iterator = struct {
+        remaining: u32,
+
+        pub fn next(iter: *Iterator) ?Color.Index {
+            const trailing_zeros = @ctz(iter.remaining);
+            if (trailing_zeros == 32) return null;
+            // iter.remaining >>= @intCast(trailing_zeros + 1) would be illegal
+            // if trailing_zeros == 31. It is simplest just to first shift out
+            // the trailing zeros (which we know to be possible) and then shift
+            // out the trailing 1 which we're considering in this iteration.
+            iter.remaining >>= @intCast(trailing_zeros);
+            iter.remaining >>= 1;
+            return @enumFromInt(trailing_zeros);
+        }
+    };
 };
 
 pub const Note = struct {
