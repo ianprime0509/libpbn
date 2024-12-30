@@ -5,8 +5,11 @@ const PuzzleSet = @import("libpbn.zig").PuzzleSet;
 const Puzzle = @import("libpbn.zig").Puzzle;
 const Color = @import("libpbn.zig").Color;
 const Clue = @import("libpbn.zig").Clue;
+const ClueLine = @import("libpbn.zig").ClueLine;
 const Solution = @import("libpbn.zig").Solution;
-const DataIndex = @import("libpbn.zig").DataIndex;
+const Cell = @import("libpbn.zig").Cell;
+const Note = @import("libpbn.zig").Note;
+const DataSlice = @import("libpbn.zig").DataSlice;
 const StringIndex = @import("libpbn.zig").StringIndex;
 
 ps: PuzzleSet,
@@ -40,17 +43,17 @@ pub fn render(r: Render) anyerror!void {
 fn renderPuzzle(r: Render, puzzle: Puzzle.Index) !void {
     const colors = r.ps.puzzles.items[@intFromEnum(puzzle)].colors;
     const row_clues = r.ps.puzzles.items[@intFromEnum(puzzle)].row_clues;
-    const n_rows = r.ps.dataSliceLen(row_clues);
+    const n_rows = row_clues.len;
     const column_clues = r.ps.puzzles.items[@intFromEnum(puzzle)].column_clues;
-    const n_columns = r.ps.dataSliceLen(column_clues);
+    const n_columns = column_clues.len;
 
     try r.writer.elementStart("puzzle");
-    const default_color = r.ps.dataSliceElem(Color, colors, @intFromEnum(Color.Index.default));
+    const default_color = r.ps.color(puzzle, .default);
     const default_color_name = r.ps.string(default_color.name);
     if (!std.mem.eql(u8, default_color_name, "black")) {
         try r.writer.attribute("defaultcolor", default_color_name);
     }
-    const background_color = r.ps.dataSliceElem(Color, colors, @intFromEnum(Color.Index.background));
+    const background_color = r.ps.color(puzzle, .background);
     const background_color_name = r.ps.string(background_color.name);
     if (!std.mem.eql(u8, background_color_name, "white")) {
         try r.writer.attribute("backgroundcolor", background_color_name);
@@ -72,9 +75,9 @@ fn renderPuzzle(r: Render, puzzle: Puzzle.Index) !void {
     try r.writer.elementEnd();
 }
 
-fn renderColors(r: Render, colors: DataIndex) !void {
-    for (0..r.ps.dataSliceLen(colors)) |i| {
-        const color = r.ps.dataSliceElem(Color, colors, i);
+fn renderColors(r: Render, colors: DataSlice(Color)) !void {
+    for (0..colors.len) |i| {
+        const color = r.ps.data(colors, @enumFromInt(i));
         try r.writer.elementStart("color");
         try r.writer.attribute("name", r.ps.string(color.name));
         try r.writer.attribute("char", &.{color.desc.char});
@@ -87,20 +90,20 @@ fn renderColors(r: Render, colors: DataIndex) !void {
 
 fn renderClues(
     r: Render,
-    clues: DataIndex,
+    clues: DataSlice(ClueLine),
     clues_type: Clue.Type,
-    colors: DataIndex,
+    colors: DataSlice(Color),
 ) !void {
     try r.writer.elementStart("clues");
     try r.writer.attribute("type", @tagName(clues_type));
-    for (0..r.ps.dataSliceLen(clues)) |i| {
-        const line = r.ps.dataSliceElem(DataIndex, clues, i);
+    for (0..clues.len) |i| {
+        const line = r.ps.data(clues, @enumFromInt(i));
         try r.writer.elementStart("line");
-        for (0..r.ps.dataSliceLen(line)) |j| {
-            const clue = r.ps.dataSliceElem(Clue, line, j);
+        for (0..line.clues.len) |j| {
+            const clue = r.ps.data(line.clues, @enumFromInt(j));
             try r.writer.elementStart("count");
             if (clue.color != .default) {
-                const color = r.ps.dataSliceElem(Color, colors, @intFromEnum(clue.color));
+                const color = r.ps.data(colors, clue.color);
                 try r.writer.attribute("color", r.ps.string(color.name));
             }
             var buf: [32]u8 = undefined;
@@ -115,14 +118,14 @@ fn renderClues(
 
 fn renderSolutions(
     r: Render,
-    solutions: DataIndex,
+    solutions: DataSlice(Solution),
     solutions_type: Solution.Type,
     n_rows: usize,
     n_columns: usize,
-    colors: DataIndex,
+    colors: DataSlice(Color),
 ) !void {
-    for (0..r.ps.dataSliceLen(solutions)) |i| {
-        const solution = r.ps.dataSliceElem(Solution, solutions, i);
+    for (0..solutions.len) |i| {
+        const solution = r.ps.data(solutions, @enumFromInt(i));
         try r.writer.elementStart("solution");
         if (solutions_type != .goal) try r.writer.attribute("type", @tagName(solutions_type));
         const id = r.ps.string(solution.id);
@@ -135,25 +138,25 @@ fn renderSolutions(
 
 fn renderImage(
     r: Render,
-    image: DataIndex,
+    image: Cell.Index,
     n_rows: usize,
     n_columns: usize,
-    colors: DataIndex,
+    colors: DataSlice(Color),
 ) !void {
     try r.writer.elementStart("image");
     for (0..n_rows) |i| {
         try r.writer.text("\n|");
-        for (r.ps.datas.items[@intFromEnum(image) + i * n_columns ..][0..n_columns]) |cell| {
-            var color_set: std.bit_set.IntegerBitSet(32) = .{ .mask = cell };
+        for (r.ps.images.items[@intFromEnum(image) + i * n_columns ..][0..n_columns]) |cell| {
+            var color_set: std.bit_set.IntegerBitSet(32) = .{ .mask = @intFromEnum(cell) };
             const n_set = color_set.count();
-            if (n_set == r.ps.dataSliceLen(colors)) {
+            if (n_set == colors.len) {
                 try r.writer.text("?");
                 continue;
             }
             if (n_set != 1) try r.writer.text("[");
             var color_iter = color_set.iterator(.{});
             while (color_iter.next()) |color_index| {
-                const color = r.ps.dataSliceElem(Color, colors, color_index);
+                const color = r.ps.data(colors, @enumFromInt(color_index));
                 try r.writer.text(&.{color.desc.char});
             }
             if (n_set != 1) try r.writer.text("]");
@@ -164,12 +167,11 @@ fn renderImage(
     try r.writer.elementEnd();
 }
 
-fn renderNotes(r: Render, notes: DataIndex) !void {
-    const n = r.ps.dataSliceLen(notes);
-    if (n == 0) return;
+fn renderNotes(r: Render, notes: DataSlice(Note)) !void {
+    if (notes.len == 0) return;
     try r.writer.elementStart("notes");
-    for (0..n) |i| {
-        try r.renderStringElement("note", r.ps.dataSliceElem(StringIndex, notes, i));
+    for (0..notes.len) |i| {
+        try r.renderStringElement("note", r.ps.data(notes, @enumFromInt(i)).text);
     }
     try r.writer.elementEnd();
 }

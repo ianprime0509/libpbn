@@ -9,8 +9,11 @@ const PuzzleSet = @import("libpbn.zig").PuzzleSet;
 const Puzzle = @import("libpbn.zig").Puzzle;
 const Color = @import("libpbn.zig").Color;
 const Clue = @import("libpbn.zig").Clue;
+const ClueLine = @import("libpbn.zig").ClueLine;
 const Solution = @import("libpbn.zig").Solution;
-const DataIndex = @import("libpbn.zig").DataIndex;
+const Cell = @import("libpbn.zig").Cell;
+const Note = @import("libpbn.zig").Note;
+const DataSlice = @import("libpbn.zig").DataSlice;
 const StringIndex = @import("libpbn.zig").StringIndex;
 
 ps: *PuzzleSet,
@@ -24,8 +27,6 @@ pub fn init(gpa: Allocator, ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagnost
     // The puzzle set data is represented as the "root" puzzle, which will be
     // initialized later.
     try ps.puzzles.append(gpa, undefined);
-    // The first element of data is used to represent an empty slice.
-    try ps.datas.append(gpa, 0);
     // The empty string must reside at index 0.
     try ps.strings.append(gpa, 0);
 
@@ -104,13 +105,13 @@ pub fn parse(p: Parse) anyerror!void {
         .author_id = author_id,
         .copyright = copyright,
         .description = .empty,
-        .colors = .empty_slice,
-        .row_clues = .empty_slice,
-        .column_clues = .empty_slice,
-        .goals = .empty_slice,
-        .solved_solutions = .empty_slice,
-        .saved_solutions = .empty_slice,
-        .notes = .empty_slice,
+        .colors = .empty,
+        .row_clues = .empty,
+        .column_clues = .empty,
+        .goals = .empty,
+        .solved_solutions = .empty,
+        .saved_solutions = .empty,
+        .notes = .empty,
     };
 }
 
@@ -122,19 +123,19 @@ fn readPuzzle(p: Parse) !?Puzzle {
     var author_id: StringIndex = .empty;
     var copyright: StringIndex = .empty;
     var description: StringIndex = .empty;
-    var colors: std.ArrayListUnmanaged(Color) = .empty;
+    var colors: Color.List = .empty;
     defer colors.deinit(p.gpa);
-    var row_clues: std.ArrayListUnmanaged(DataIndex) = .empty;
+    var row_clues: ClueLine.List = .empty;
     defer row_clues.deinit(p.gpa);
-    var column_clues: std.ArrayListUnmanaged(DataIndex) = .empty;
+    var column_clues: ClueLine.List = .empty;
     defer column_clues.deinit(p.gpa);
-    var goals: std.ArrayListUnmanaged(Solution) = .empty;
+    var goals: Solution.List = .empty;
     defer goals.deinit(p.gpa);
-    var solved_solutions: std.ArrayListUnmanaged(Solution) = .empty;
+    var solved_solutions: Solution.List = .empty;
     defer solved_solutions.deinit(p.gpa);
-    var saved_solutions: std.ArrayListUnmanaged(Solution) = .empty;
+    var saved_solutions: Solution.List = .empty;
     defer saved_solutions.deinit(p.gpa);
-    var notes: std.ArrayListUnmanaged(StringIndex) = .empty;
+    var notes: Note.List = .empty;
     defer notes.deinit(p.gpa);
 
     // To avoid managing many smaller (and more difficult to manage)
@@ -226,7 +227,7 @@ fn readPuzzle(p: Parse) !?Puzzle {
             },
             .note => {
                 try p.noAttributes();
-                try notes.append(p.gpa, try p.addElementString());
+                try notes.append(p.gpa, .{ .text = try p.addElementString() });
             },
         }
     }
@@ -324,12 +325,12 @@ fn readPuzzle(p: Parse) !?Puzzle {
         .copyright = copyright,
         .description = description,
         .colors = try p.ps.addDataSlice(p.gpa, Color, colors.items),
-        .row_clues = try p.ps.addDataSlice(p.gpa, DataIndex, row_clues.items),
-        .column_clues = try p.ps.addDataSlice(p.gpa, DataIndex, column_clues.items),
+        .row_clues = try p.ps.addDataSlice(p.gpa, ClueLine, row_clues.items),
+        .column_clues = try p.ps.addDataSlice(p.gpa, ClueLine, column_clues.items),
         .goals = try p.ps.addDataSlice(p.gpa, Solution, goals.items),
         .solved_solutions = try p.ps.addDataSlice(p.gpa, Solution, solved_solutions.items),
         .saved_solutions = try p.ps.addDataSlice(p.gpa, Solution, saved_solutions.items),
-        .notes = try p.ps.addDataSlice(p.gpa, StringIndex, notes.items),
+        .notes = try p.ps.addDataSlice(p.gpa, Note, notes.items),
     };
 }
 
@@ -547,21 +548,25 @@ fn readClue(p: Parse, arena: Allocator, default_color_name: []const u8) !ParsedC
 fn processClues(
     p: Parse,
     parsed_clues: []const []const ParsedClue,
-    clues: *std.ArrayListUnmanaged(DataIndex),
+    clues: *ClueLine.List,
     colors_by_name: std.StringArrayHashMapUnmanaged(Color.Index),
 ) !void {
     try clues.ensureTotalCapacityPrecise(p.gpa, parsed_clues.len);
     for (parsed_clues) |parsed_line| {
-        const line: DataIndex = @enumFromInt(p.ps.datas.items.len);
-        try p.ps.datas.ensureUnusedCapacity(p.gpa, PuzzleSet.dataSizeOf(Clue) * parsed_line.len + 1);
-        p.ps.datas.appendAssumeCapacity(@intCast(parsed_line.len));
+        const line_base: u32 = @intCast(p.ps.clues.items.len);
+        try p.ps.clues.ensureUnusedCapacity(p.gpa, parsed_line.len);
         for (parsed_line) |parsed_clue| {
-            _ = p.ps.addDataAssumeCapacity(Clue, .{
+            _ = p.ps.clues.appendAssumeCapacity(.{
                 .color = colors_by_name.get(parsed_clue.color_name) orelse return error.ColorUndefined,
                 .count = parsed_clue.count,
             });
         }
-        clues.appendAssumeCapacity(line);
+        clues.appendAssumeCapacity(.{
+            .clues = .{
+                .base = line_base,
+                .len = @intCast(parsed_line.len),
+            },
+        });
     }
 }
 
@@ -574,7 +579,7 @@ fn readSolution(p: Parse, arena: Allocator) !?ParsedSolution {
     var @"type": Solution.Type = .goal;
     var id: StringIndex = .empty;
     var image: ?[][][]u8 = null;
-    var notes: std.ArrayListUnmanaged(StringIndex) = .empty;
+    var notes: std.ArrayListUnmanaged(Note) = .empty;
 
     var attrs = p.attributes(enum { type, id });
     while (try attrs.next()) |attr| {
@@ -600,7 +605,7 @@ fn readSolution(p: Parse, arena: Allocator) !?ParsedSolution {
             },
             .note => {
                 try p.noAttributes();
-                try notes.append(arena, try p.addElementString());
+                try notes.append(arena, .{ .text = try p.addElementString() });
             },
         }
     }
@@ -679,21 +684,20 @@ fn processSolution(
     n_columns: usize,
     colors_by_char: std.AutoArrayHashMapUnmanaged(u8, Color.Index),
 ) !Solution {
-    const image_index: DataIndex = @enumFromInt(p.ps.datas.items.len);
-    try p.ps.datas.ensureUnusedCapacity(p.gpa, n_rows * n_columns);
+    const image_index: Cell.Index = @enumFromInt(p.ps.images.items.len);
+    try p.ps.images.ensureUnusedCapacity(p.gpa, n_rows * n_columns);
     if (solution.image.len != n_rows) return error.ImageMismatchedDimensions;
     for (solution.image) |row| {
         if (row.len != n_columns) return error.ImageMismatchedDimensions;
         for (row) |cell| {
-            const colors = try processCell(cell, solution.type, colors_by_char);
-            p.ps.datas.appendAssumeCapacity(colors);
+            p.ps.images.appendAssumeCapacity(try processCell(cell, solution.type, colors_by_char));
         }
     }
 
     return .{
         .id = solution.id,
         .image = image_index,
-        .notes = try p.ps.addDataSlice(p.gpa, StringIndex, solution.notes),
+        .notes = try p.ps.addDataSlice(p.gpa, Note, solution.notes),
     };
 }
 
@@ -701,46 +705,46 @@ fn processCell(
     cell: []const u8,
     solution_type: Solution.Type,
     colors_by_char: std.AutoArrayHashMapUnmanaged(u8, Color.Index),
-) !u32 {
+) !Cell {
     if (solution_type != .saved and (cell.len != 1 or cell[0] == '?')) return error.SolutionIndeterminateImage;
-    var colors: u32 = 0;
+    var bits: u32 = 0;
     for (cell) |c| {
         if (c == '?') {
-            colors = @intCast((@as(u33, 1) << @intCast(colors_by_char.count())) - 1);
+            bits = @intCast((@as(u33, 1) << @intCast(colors_by_char.count())) - 1);
         } else {
             const color = colors_by_char.get(c) orelse return error.ColorUndefined;
-            colors |= @as(u32, 1) << @intFromEnum(color);
+            bits |= @as(u32, 1) << @intFromEnum(color);
         }
     }
-    return colors;
+    return @enumFromInt(bits);
 }
 
 fn deriveClues(
     p: Parse,
     n_rows: usize,
-    row_clues: *std.ArrayListUnmanaged(DataIndex),
+    row_clues: *ClueLine.List,
     n_columns: usize,
-    column_clues: *std.ArrayListUnmanaged(DataIndex),
-    image: DataIndex,
+    column_clues: *ClueLine.List,
+    image: Cell.Index,
 ) !void {
     // We have already validated that the image is a proper goal image, so that
     // each cell has exactly one bit set.
-    var clues: std.ArrayListUnmanaged(Clue) = .empty;
-    defer clues.deinit(p.gpa);
+    var line: Clue.List = .empty;
+    defer line.deinit(p.gpa);
 
     try row_clues.ensureTotalCapacityPrecise(p.gpa, n_rows);
     for (0..n_rows) |i| {
-        clues.clearRetainingCapacity();
+        line.clearRetainingCapacity();
 
         var run_color: Color.Index = .background;
         var run_len: usize = 0;
         for (0..n_columns) |j| {
-            const color: Color.Index = @enumFromInt(@ctz(p.ps.datas.items[@intFromEnum(image) + i * n_columns + j]));
+            const color: Color.Index = @enumFromInt(@ctz(@intFromEnum(p.ps.images.items[@intFromEnum(image) + i * n_columns + j])));
             if (color == run_color) {
                 run_len += 1;
             } else {
                 if (run_color != .background) {
-                    try clues.append(p.gpa, .{
+                    try line.append(p.gpa, .{
                         .color = run_color,
                         .count = @intCast(run_len),
                     });
@@ -750,28 +754,30 @@ fn deriveClues(
             }
         }
         if (run_color != .background) {
-            try clues.append(p.gpa, .{
+            try line.append(p.gpa, .{
                 .color = run_color,
                 .count = @intCast(run_len),
             });
         }
 
-        row_clues.appendAssumeCapacity(try p.ps.addDataSlice(p.gpa, Clue, clues.items));
+        row_clues.appendAssumeCapacity(.{
+            .clues = try p.ps.addDataSlice(p.gpa, Clue, line.items),
+        });
     }
 
     try column_clues.ensureTotalCapacityPrecise(p.gpa, n_columns);
     for (0..n_columns) |j| {
-        clues.clearRetainingCapacity();
+        line.clearRetainingCapacity();
 
         var run_color: Color.Index = .background;
         var run_len: usize = 0;
         for (0..n_rows) |i| {
-            const color: Color.Index = @enumFromInt(@ctz(p.ps.datas.items[@intFromEnum(image) + i * n_columns + j]));
+            const color: Color.Index = @enumFromInt(@ctz(@intFromEnum(p.ps.images.items[@intFromEnum(image) + i * n_columns + j])));
             if (color == run_color) {
                 run_len += 1;
             } else {
                 if (run_color != .background) {
-                    try clues.append(p.gpa, .{
+                    try line.append(p.gpa, .{
                         .color = run_color,
                         .count = @intCast(run_len),
                     });
@@ -781,13 +787,15 @@ fn deriveClues(
             }
         }
         if (run_color != .background) {
-            try clues.append(p.gpa, .{
+            try line.append(p.gpa, .{
                 .color = run_color,
                 .count = @intCast(run_len),
             });
         }
 
-        column_clues.appendAssumeCapacity(try p.ps.addDataSlice(p.gpa, Clue, clues.items));
+        column_clues.appendAssumeCapacity(.{
+            .clues = try p.ps.addDataSlice(p.gpa, Clue, line.items),
+        });
     }
 }
 
@@ -795,7 +803,7 @@ const ParsedSolution = struct {
     id: StringIndex,
     type: Solution.Type,
     image: []const []const []const u8,
-    notes: []const StringIndex,
+    notes: []const Note,
 };
 
 fn readChild(p: Parse, comptime Child: type) !?Child {
