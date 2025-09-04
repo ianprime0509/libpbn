@@ -2,7 +2,7 @@
     .name = .libpbn,
     .version = "0.0.0",
     .fingerprint = 0x62c9691cd5b6084d, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.1",
     .paths = .{
         "LICENSE",
         "README.md",
@@ -12,8 +12,8 @@
     },
     .dependencies = .{
         .xml = .{
-            .url = "git+https://github.com/ianprime0509/zig-xml?ref=main#c2b02045810108e7a807855dc592157f44d32fb1",
-            .hash = "xml-0.1.0-ZTbP35VkAgAp2cDlvsPuL7SWVZWwPg-V99LmVRSHbCtL",
+            .url = "git+https://github.com/ianprime0509/zig-xml?ref=main#b0723c18016c0f7b1f7219576df8db31ce68dcd3",
+            .hash = "xml-0.1.0-ZTbP35UoAgDk1IhivGX2bzjEqMCBy2Q5QQBdrUoNURiJ",
         },
     },
 }

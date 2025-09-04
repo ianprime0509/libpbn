@@ -24,7 +24,7 @@ pub fn init(ps: PuzzleSet, writer: *xml.Writer) Render {
     };
 }
 
-pub fn render(r: Render) anyerror!void {
+pub fn render(r: Render) xml.Writer.WriteError!void {
     try r.writer.xmlDeclaration("UTF-8", true);
     try r.writer.elementStart("puzzleset");
     try r.renderStringElement("source", r.ps.puzzles.items[0].source);
@@ -37,7 +37,7 @@ pub fn render(r: Render) anyerror!void {
     }
     try r.renderNotes(r.ps.puzzles.items[0].notes);
     try r.writer.elementEnd();
-    try r.writer.sink.write("\n");
+    try r.writer.eof();
 }
 
 fn renderPuzzle(r: Render, puzzle: Puzzle.Index) !void {

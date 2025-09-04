@@ -11,7 +11,7 @@ pub const max_colors = 32;
 pub const ParseError = error{InvalidPbn} || Allocator.Error;
 
 pub const Diagnostics = struct {
-    errors: std.ArrayListUnmanaged(Error),
+    errors: std.ArrayList(Error),
     gpa: Allocator,
 
     pub const Error = struct {
@@ -76,7 +76,7 @@ pub const PuzzleSet = struct {
     solutions: Solution.List,
     images: Cell.List,
     notes: Note.List,
-    strings: std.ArrayListUnmanaged(u8),
+    strings: std.ArrayList(u8),
     gpa: Allocator,
 
     pub fn deinit(ps: *PuzzleSet) void {
@@ -259,39 +259,39 @@ pub const PuzzleSet = struct {
     }
 
     pub fn parse(gpa: Allocator, pbn_xml: []const u8, diag: *Diagnostics) ParseError!PuzzleSet {
-        var doc: xml.StaticDocument = .init(pbn_xml);
-        var reader = doc.reader(gpa, .{
+        var static_reader: xml.Reader.Static = .init(gpa, pbn_xml, .{
             // The PBN format does not use namespaces.
             .namespace_aware = false,
         });
-        defer reader.deinit();
-        var puzzle_set = parseXml(gpa, reader.raw(), diag) catch |err| switch (err) {
+        defer static_reader.deinit();
+        const reader = &static_reader.interface;
+        var puzzle_set = parseXml(gpa, reader, diag) catch |err| switch (err) {
             error.MalformedXml => return diag.fatal(.{ .xml = reader.errorCode() }, reader.errorLocation()),
-            else => |other| return @as(ParseError, @errorCast(other)),
+            error.ReadFailed => unreachable,
+            else => |other| return other,
         };
         errdefer puzzle_set.deinit();
         if (diag.errors.items.len > 0) return error.InvalidPbn;
         return puzzle_set;
     }
 
-    pub fn parseReader(gpa: Allocator, pbn_xml: anytype, diag: *Diagnostics) (ParseError || @TypeOf(pbn_xml).Error)!PuzzleSet {
-        var doc = xml.streamingDocument(gpa, pbn_xml);
-        defer doc.deinit();
-        var reader = doc.reader(gpa, .{
+    pub fn parseReader(gpa: Allocator, pbn_xml: *std.Io.Reader, diag: *Diagnostics) (ParseError || std.Io.Reader.Error)!PuzzleSet {
+        var streaming_reader: xml.Reader.Streaming = .init(gpa, pbn_xml, .{
             // The PBN format does not use namespaces.
             .namespace_aware = false,
         });
-        defer reader.deinit();
-        var puzzle_set = parseXml(gpa, reader.raw(), diag) catch |err| switch (err) {
+        defer streaming_reader.deinit();
+        const reader = &streaming_reader.interface;
+        var puzzle_set = parseXml(gpa, reader, diag) catch |err| switch (err) {
             error.MalformedXml => return diag.fatal(.{ .xml = reader.errorCode() }, reader.errorLocation()),
-            else => |other| return @as(ParseError || @TypeOf(pbn_xml).Error, @errorCast(other)),
+            else => |other| return other,
         };
         errdefer puzzle_set.deinit();
         if (diag.errors.items.len > 0) return error.InvalidPbn;
         return puzzle_set;
     }
 
-    fn parseXml(gpa: Allocator, reader: *xml.Reader, diag: *Diagnostics) anyerror!PuzzleSet {
+    fn parseXml(gpa: Allocator, reader: *xml.Reader, diag: *Diagnostics) (ParseError || xml.Reader.ReadError)!PuzzleSet {
         var ps: PuzzleSet = .{
             .puzzles = .empty,
             .colors = .empty,
@@ -309,17 +309,16 @@ pub const PuzzleSet = struct {
         return ps;
     }
 
-    pub fn render(ps: PuzzleSet, gpa: Allocator, writer: anytype) (Allocator.Error || @TypeOf(writer).Error)!void {
-        var output = xml.streamingOutput(writer);
-        var xml_writer = output.writer(gpa, .{
+    pub fn render(ps: PuzzleSet, gpa: Allocator, writer: *std.Io.Writer) (Allocator.Error || std.Io.Writer.Error)!void {
+        var xml_writer: xml.Writer = .init(gpa, writer, .{
             .indent = "  ",
             .namespace_aware = false,
         });
         defer xml_writer.deinit();
-        return @errorCast(ps.renderXml(xml_writer.raw()));
+        try ps.renderXml(&xml_writer);
     }
 
-    fn renderXml(ps: PuzzleSet, writer: *xml.Writer) anyerror!void {
+    fn renderXml(ps: PuzzleSet, writer: *xml.Writer) xml.Writer.WriteError!void {
         const r: Render = .init(ps, writer);
         try r.render();
     }
@@ -396,7 +395,7 @@ pub const Puzzle = struct {
         _,
     };
 
-    pub const List = std.ArrayListUnmanaged(Puzzle);
+    pub const List = std.ArrayList(Puzzle);
 };
 
 pub const Color = struct {
@@ -414,7 +413,7 @@ pub const Color = struct {
         _,
     };
 
-    pub const List = std.ArrayListUnmanaged(Color);
+    pub const List = std.ArrayList(Color);
 
     pub fn rgb(color: Color) struct { u8, u8, u8 } {
         return .{ color.desc.r, color.desc.g, color.desc.b };
@@ -434,7 +433,7 @@ pub const ClueLine = struct {
 
     pub const Index = enum(u32) { _ };
 
-    pub const List = std.ArrayListUnmanaged(ClueLine);
+    pub const List = std.ArrayList(ClueLine);
 };
 
 pub const Clue = packed struct(u32) {
@@ -448,7 +447,7 @@ pub const Clue = packed struct(u32) {
 
     pub const Index = enum(u32) { _ };
 
-    pub const List = std.ArrayListUnmanaged(Clue);
+    pub const List = std.ArrayList(Clue);
 };
 
 pub const Solution = struct {
@@ -464,7 +463,7 @@ pub const Solution = struct {
 
     pub const Index = enum(u32) { _ };
 
-    pub const List = std.ArrayListUnmanaged(Solution);
+    pub const List = std.ArrayList(Solution);
 };
 
 pub const Image = struct {
@@ -484,7 +483,7 @@ pub const Cell = enum(u32) {
 
     pub const Index = enum(u32) { _ };
 
-    pub const List = std.ArrayListUnmanaged(Cell);
+    pub const List = std.ArrayList(Cell);
 
     pub fn only(color: Color.Index) Cell {
         return @enumFromInt(@as(u32, 1) << @intFromEnum(color));
@@ -527,7 +526,7 @@ pub const Note = struct {
 
     pub const Index = enum(u32) { _ };
 
-    pub const List = std.ArrayListUnmanaged(Note);
+    pub const List = std.ArrayList(Note);
 };
 
 pub fn DataSlice(comptime T: type) type {
@@ -548,7 +547,7 @@ pub const StringIndex = enum(u32) {
 };
 
 pub fn main() !void {
-    var gpa_state: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa_state: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa_state.deinit();
     const gpa = gpa_state.allocator();
 
@@ -563,9 +562,11 @@ pub fn main() !void {
     var ps = try PuzzleSet.parse(gpa, raw, &diag);
     defer ps.deinit();
 
-    var stdout_buf = std.io.bufferedWriter(std.io.getStdOut().writer());
-    try ps.render(gpa, stdout_buf.writer());
-    try stdout_buf.flush();
+    var stdout_buf: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    const stdout = &stdout_writer.interface;
+    try ps.render(gpa, stdout);
+    try stdout.flush();
 }
 
 test "parse and render - simple puzzle" {
@@ -713,8 +714,8 @@ fn testParseAndRender(input: []const u8, expected_output: []const u8) !void {
     defer ps.deinit();
     try std.testing.expectEqual(0, diag.errors.items.len);
 
-    var output: std.ArrayListUnmanaged(u8) = .empty;
-    defer output.deinit(gpa);
-    try ps.render(gpa, output.writer(gpa));
-    try std.testing.expectEqualStrings(expected_output, output.items);
+    var output: std.Io.Writer.Allocating = .init(gpa);
+    defer output.deinit();
+    try ps.render(gpa, &output.writer);
+    try std.testing.expectEqualStrings(expected_output, output.written());
 }
