@@ -16,11 +16,11 @@ pub fn build(b: *std.Build) void {
     });
     libpbn.addImport("xml", xml.module("xml"));
 
-    const step_test = b.step("test", "Run all tests");
+    const test_step = b.step("test", "Run all tests");
 
     const libpbn_test = b.addTest(.{ .root_module = libpbn });
     const libpbn_test_run = b.addRunArtifact(libpbn_test);
-    step_test.dependOn(&libpbn_test_run.step);
+    test_step.dependOn(&libpbn_test_run.step);
 
     const libpbn_exe = b.addExecutable(.{
         .name = "libpbn-test",
@@ -31,4 +31,16 @@ pub fn build(b: *std.Build) void {
     const libpbn_exe_run = b.addRunArtifact(libpbn_exe);
     if (b.args) |args| libpbn_exe_run.addArgs(args);
     b.step("run", "Run").dependOn(&libpbn_exe_run.step);
+
+    const docs_step = b.step("docs", "Build the documentation");
+    const libpbn_docs = b.addObject(.{
+        .name = "libpbn",
+        .root_module = libpbn,
+    });
+    const libpbn_docs_copy = b.addInstallDirectory(.{
+        .source_dir = libpbn_docs.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    docs_step.dependOn(&libpbn_docs_copy.step);
 }

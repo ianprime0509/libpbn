@@ -36,13 +36,13 @@ pub fn init(ps: *PuzzleSet, reader: *xml.Reader, diag: *Diagnostics) Allocator.E
     };
 }
 
-pub fn parse(p: Parse) anyerror!void {
+pub fn parse(p: Parse) (error{InvalidPbn} || xml.Reader.ReadError)!void {
     var source: StringIndex = .empty;
     var title: StringIndex = .empty;
     var author: StringIndex = .empty;
     var author_id: StringIndex = .empty;
     var copyright: StringIndex = .empty;
-    var notes: std.ArrayListUnmanaged(StringIndex) = .empty;
+    var notes: std.ArrayList(StringIndex) = .empty;
     defer notes.deinit(p.ps.gpa);
 
     try p.reader.skipProlog();
@@ -881,21 +881,29 @@ fn AttributeIterator(comptime Name: type) type {
 
 fn addElementString(p: Parse) !StringIndex {
     const index: StringIndex = @enumFromInt(p.ps.strings.items.len);
-    var writer = p.ps.strings.writer(p.ps.gpa);
-    try p.readElementTextWrite(writer.any());
-    try p.ps.strings.append(p.ps.gpa, 0);
+    var aw: std.Io.Writer.Allocating = .fromArrayList(p.ps.gpa, &p.ps.strings);
+    defer p.ps.strings = aw.toArrayList();
+    p.readElementTextWrite(&aw.writer) catch |err| switch (err) {
+        error.WriteFailed => return error.OutOfMemory,
+        else => |other| return other,
+    };
+    aw.writer.writeByte(0) catch |err| switch (err) {
+        error.WriteFailed => return error.OutOfMemory,
+    };
     return index;
 }
 
 fn readElementTextAlloc(p: Parse, allocator: Allocator) ![]u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .empty;
-    defer buf.deinit(allocator);
-    var writer = buf.writer(allocator);
-    try p.readElementTextWrite(writer.any());
-    return try buf.toOwnedSlice(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    p.readElementTextWrite(&aw.writer) catch |err| switch (err) {
+        error.WriteFailed => return error.OutOfMemory,
+        else => |other| return other,
+    };
+    return try aw.toOwnedSlice();
 }
 
-fn readElementTextWrite(p: Parse, writer: std.io.AnyWriter) !void {
+fn readElementTextWrite(p: Parse, writer: *std.Io.Writer) !void {
     // This is a stricter version of the logic in xml.Reader.readElementTextWrite.
     const depth = p.reader.element_names.items.len;
     while (true) {
